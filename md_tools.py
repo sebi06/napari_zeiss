@@ -14,34 +14,16 @@
 import czifile as zis
 from apeer_ometiff_library import omexmlClass
 import os
-from pathlib import Path
 import xmltodict
 import numpy as np
 from collections import Counter
 from lxml import etree as ET
-from aicsimageio import AICSImage, imread, imread_dask
+from aicsimageio import AICSImage
 from aicspylibczi import CziFile
 import dask.array as da
 import pandas as pd
 import tifffile
 import pydash
-
-try:
-    import napari
-except ModuleNotFoundError as error:
-    print(error.__class__.__name__ + ": " + error.msg)
-
-from PyQt5.QtWidgets import (
-    QHBoxLayout,
-    QFileDialog,
-    QDialogButtonBox,
-    QWidget,
-    QTableWidget,
-    QTableWidgetItem,
-)
-from PyQt5.QtCore import Qt
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtGui import QFont
 
 
 def get_imgtype(imagefile):
@@ -1001,75 +983,6 @@ def get_dimorder(dimstring):
     return dims_dict, dimindex_list, numvalid_dims
 
 
-def get_array_czi(filename,
-                  replace_value=False,
-                  remove_HDim=True,
-                  return_addmd=False,
-                  forceDim=False,
-                  forceDimname='SizeC',
-                  forceDimvalue=2):
-    """Get the pixel data of the CZI file as multidimensional NumPy.Array
-
-    :param filename: filename of the CZI file
-    :type filename: str
-    :param replacevalue: replace arrays entries with a specific value with NaN, defaults to False
-    :type replacevalue: bool, optional
-    :param remove_HDim: remove the H-Dimension (Airy Scan Detectors), defaults to True
-    :type remove_HDim: bool, optional
-    :param return_addmd: read the additional metadata, defaults to False
-    :type return_addmd: bool, optional
-    :param forceDim: force a specfic dimension to have a specif value, defaults to False
-    :type forceDim: bool, optional
-    :param forceDimname: name of the dimension, defaults to 'SizeC'
-    :type forceDimname: str, optional
-    :param forceDimvalue: value of the dimension, defaults to 2
-    :type forceDimvalue: int, optional
-    :return: cziarray - dictionary with the dimensions and its positions
-    :rtype: NumPy.Array
-    :return: metadata - dictionary with CZI metadata
-    :rtype: dict
-    :return: additional_metadata_czi - dictionary with additional CZI metadata
-    :rtype: dict
-    """
-
-    metadata = get_metadata_czi(filename,
-                                forceDim=forceDim,
-                                forceDimname=forceDimname,
-                                forceDimvalue=forceDimvalue)
-
-    # get additional metainformation
-    additional_metadata_czi = get_additional_metadata_czi(filename)
-
-    # get CZI object and read array
-    czi = zis.CziFile(filename)
-    cziarray = czi.asarray()
-
-    # check for H dimension and remove
-    if remove_HDim and metadata['Axes_czifile'][0] == 'H':
-        # metadata['Axes'] = metadata['Axes_czifile'][1:]
-        metadata['Axes_czifile'] = metadata['Axes_czifile'].replace('H', '')
-        cziarray = np.squeeze(cziarray, axis=0)
-
-    # get additional information about dimension order etc.
-    dim_dict, dim_list, numvalid_dims = get_dimorder(metadata['Axes_czifile'])
-    metadata['DimOrder CZI'] = dim_dict
-
-    if cziarray.shape[-1] == 3:
-        pass
-    else:
-        # remove the last dimension from the end
-        cziarray = np.squeeze(cziarray, axis=len(metadata['Axes_czifile']) - 1)
-        metadata['Axes_czifile'] = metadata['Axes_czifile'].replace('0', '')
-
-    if replace_value:
-        cziarray = replace_value(cziarray, value=0)
-
-    # close czi file
-    czi.close()
-
-    return cziarray, metadata, additional_metadata_czi
-
-
 def replace_value(data, value=0):
     """Replace specifc values in array with NaN
 
@@ -1138,208 +1051,6 @@ def calc_scaling(data, corr_min=1.0,
     print('Scaling: ', minvalue, maxvalue)
 
     return [minvalue, maxvalue]
-
-
-def show_napari(array, metadata,
-                blending='additive',
-                gamma=0.85,
-                add_mdtable=True,
-                rename_sliders=False):
-    """Show the multidimensional array using the Napari viewer
-
-    :param array: multidimensional NumPy.Array containing the pixeldata
-    :type array: NumPy.Array
-    :param metadata: dictionary with CZI or OME-TIFF metadata
-    :type metadata: dict
-    :param blending: NapariViewer option for blending, defaults to 'additive'
-    :type blending: str, optional
-    :param gamma: NapariViewer value for Gamma, defaults to 0.85
-    :type gamma: float, optional
-    :param rename_sliders: name slider with correct labels output, defaults to False
-    :type verbose: bool, optional
-    """
-
-    class TableWidget(QWidget):
-
-        def __init__(self):
-            super(QWidget, self).__init__()
-            self.layout = QHBoxLayout(self)
-            self.mdtable = QTableWidget()
-            self.layout.addWidget(self.mdtable)
-            self.mdtable.setShowGrid(True)
-            self.mdtable.setHorizontalHeaderLabels(['Parameter', 'Value'])
-            header = self.mdtable.horizontalHeader()
-            header.setDefaultAlignment(Qt.AlignLeft)
-
-        def update_metadata(self, md):
-
-            row_count = len(md)
-            col_count = 2
-
-            self.mdtable.setColumnCount(col_count)
-            self.mdtable.setRowCount(row_count)
-
-            row = 0
-
-            for key, value in md.items():
-                newkey = QTableWidgetItem(key)
-                self.mdtable.setItem(row, 0, newkey)
-                newvalue = QTableWidgetItem(str(value))
-                self.mdtable.setItem(row, 1, newvalue)
-                row += 1
-
-            # fit columns to content
-            self.mdtable.resizeColumnsToContents()
-
-        def update_style(self):
-
-            fnt = QFont()
-            fnt.setPointSize(11)
-            fnt.setBold(True)
-            fnt.setFamily("Arial")
-
-            item1 = QtWidgets.QTableWidgetItem('Parameter')
-            item1.setForeground(QtGui.QColor(25, 25, 25))
-            item1.setFont(fnt)
-            self.mdtable.setHorizontalHeaderItem(0, item1)
-            item2 = QtWidgets.QTableWidgetItem('Value')
-            item2.setForeground(QtGui.QColor(25, 25, 25))
-            item2.setFont(fnt)
-            self.mdtable.setHorizontalHeaderItem(1, item2)
-
-    # create list for the napari layers
-    napari_layers = []
-
-    with napari.gui_qt():
-
-        # create scalefcator with all ones
-        scalefactors = [1.0] * len(array.shape)
-        dimpos = get_dimpositions(metadata['Axes_aics'])
-
-        # get the scalefactors from the metadata
-        scalef = get_scalefactor(metadata)
-
-        # modify the tuple for the scales for napari
-        scalefactors[dimpos['Z']] = scalef['zx']
-
-        # remove C dimension from scalefactor
-        scalefactors_ch = scalefactors.copy()
-        del scalefactors_ch[dimpos['C']]
-
-        # initialize the napari viewer
-        print('Initializing Napari Viewer ...')
-
-        # create a viewer and add some images
-        viewer = napari.Viewer()
-
-        # add widget for metadata
-        if add_mdtable:
-
-            # create widget for the metadata
-            mdbrowser = TableWidget()
-
-            viewer.window.add_dock_widget(mdbrowser,
-                                          name='mdbrowser',
-                                          area='right')
-
-            # add the metadata and adapt the table display
-            mdbrowser.update_metadata(metadata)
-            mdbrowser.update_style()
-
-        if metadata['SizeC'] > 1:
-
-            # add all channels as layers
-            for ch in range(metadata['SizeC']):
-
-                try:
-                    # get the channel name
-                    chname = metadata['Channels'][ch]
-                except KeyError as e:
-                    print(e)
-                    # or use CH1 etc. as string for the name
-                    chname = 'CH' + str(ch + 1)
-
-                # cut out channel
-                # use dask if array is a dask.array
-                if isinstance(array, da.Array):
-                    print('Extract Channel using Dask.Array')
-                    channel = array.compute().take(ch, axis=dimpos['C'])
-                    new_dimstring = metadata['Axes_aics'].replace('C', '')
-
-                else:
-                    # use normal numpy if not
-                    print('Extract Channel NumPy.Array')
-                    channel = array.take(ch, axis=dimpos['C'])
-                    new_dimstring = metadata['Axes_aics'].replace('C', '')
-
-                # actually show the image array
-                print('Adding Channel  : ', chname)
-                print('Shape Channel   : ', ch, channel.shape)
-                print('Scaling Factors : ', scalefactors_ch)
-
-                # get min-max values for initial scaling
-                clim = calc_scaling(channel,
-                                    corr_min=1.0,
-                                    offset_min=0,
-                                    corr_max=0.85,
-                                    offset_max=0)
-
-                # add channel to napari viewer
-                new_layer = viewer.add_image(channel,
-                                             name=chname,
-                                             scale=scalefactors_ch,
-                                             contrast_limits=clim,
-                                             blending=blending,
-                                             gamma=gamma)
-
-                napari_layers.append(new_layer)
-
-        if metadata['SizeC'] == 1:
-
-            # just add one channel as a layer
-            try:
-                # get the channel name
-                chname = metadata['Channels'][0]
-            except KeyError:
-                # or use CH1 etc. as string for the name
-                chname = 'CH' + str(ch + 1)
-
-            # actually show the image array
-            print('Adding Channel: ', chname)
-            print('Scaling Factors: ', scalefactors)
-
-            # get min-max values for initial scaling
-            clim = calc_scaling(array)
-
-            # add layer to Napari viewer
-            new_layer = viewer.add_image(array,
-                                         name=chname,
-                                         scale=scalefactors,
-                                         contrast_limits=clim,
-                                         blending=blending,
-                                         gamma=gamma)
-
-            napari_layers.append(new_layer)
-
-        if rename_sliders:
-
-            print('Renaming the Sliders based on the Dimension String ....')
-
-            # get the position of dimension entries after removing C dimension
-            dimpos_viewer = get_dimpositions(new_dimstring)
-
-            # get the label of the sliders
-            sliders = viewer.dims.axis_labels
-
-            # update the labels with the correct dimension strings
-            slidernames = ['B', 'S', 'T', 'Z']
-            for s in slidernames:
-                if dimpos_viewer[s] >= 0:
-                    sliders[dimpos_viewer[s]] = s
-            # apply the new labels to the viewer
-            viewer.dims.axis_labels = sliders
-
-    return napari_layers
 
 
 def check_for_previewimage(czi):
@@ -1468,32 +1179,9 @@ def addzeros(number):
     return zerostring
 
 
-def get_fname_woext(filepath):
-    """Get the complete path of a file without the extension
-    It alos will works for extensions like c:\myfile.abc.xyz
-    The output will be: c:\myfile
-
-    :param filepath: complete fiepath
-    :type filepath: str
-    :return: complete filepath without extension
-    :rtype: str
-    """
-    # create empty string
-    real_extension = ''
-
-    # get all part of the file extension
-    sufs = Path(filepath).suffixes
-    for s in sufs:
-        real_extension = real_extension + s
-
-    # remover real extension from filepath
-    filepath_woext = filepath.replace(real_extension, '')
-
-    return filepath_woext
-
-
 def get_dimpositions(dimstring, tocheck=['B', 'S', 'T', 'Z', 'C']):
-    """Simple function to get the indices of the dimension identifiers in a string
+    """Simple function to get the indices of the
+    dimension identifiers in a string
 
     :param dimstring: dimension string
     :type dimstring: str
@@ -1507,30 +1195,6 @@ def get_dimpositions(dimstring, tocheck=['B', 'S', 'T', 'Z', 'C']):
         dimpos[p] = dimstring.find(p)
 
     return dimpos
-
-
-def norm_columns(df, colname='Time [s]', mode='min'):
-    """Normalize a specif column inside a Pandas dataframe
-
-    :param df: DataFrame
-    :type df: pf.DataFrame
-    :param colname: Name of the coumn to be normalized, defaults to 'Time [s]'
-    :type colname: str, optional
-    :param mode: Mode of Normalization, defaults to 'min'
-    :type mode: str, optional
-    :return: Dataframe with normalized column
-    :rtype: pd.DataFrame
-    """
-    # normalize columns according to min or max value
-    if mode == 'min':
-        min_value = df[colname].min()
-        df[colname] = df[colname] - min_value
-
-    if mode == 'max':
-        max_value = df[colname].max()
-        df[colname] = df[colname] - max_value
-
-    return df
 
 
 def getdims_pylibczi(czi):

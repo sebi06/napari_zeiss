@@ -92,6 +92,8 @@ class FileTree(QWidget):
     def __init__(self, workdir):
         super(QWidget, self).__init__()
 
+        filter = ['*.czi', '*.ome.tiff', '*ome.tif' '*.tiff' '*.tif']
+
         self.setStyleSheet("""
             QTreeView::item {
             background-color: rgb(38, 41, 48);
@@ -114,7 +116,7 @@ class FileTree(QWidget):
         self.model.setRootPath(workdir)
         self.model.setFilter(QtCore.QDir.AllDirs | QDir.Files | QtCore.QDir.NoDotAndDotDot)
         self.model.setNameFilterDisables(False)
-        self.model.setNameFilters(['*.czi', '*.ome.tiff', '*ome.tif' '*.tiff' '*.tif'])
+        self.model.setNameFilters(filter)
 
         self.tree = QTreeView()
         self.tree.setModel(self.model)
@@ -332,8 +334,6 @@ with napari.gui_qt():
 
     # create a viewer
     viewer = napari.Viewer()
-
-    # add widgets
 
     # add a FileTree widget
     viewer.window.add_dock_widget(filetree, name='filebrowser', area='right')
