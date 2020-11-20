@@ -1,5 +1,7 @@
 # taken from:
 # https://forum.image.sc/t/how-to-remove-a-widget-from-napari-or-how-to-update-it/45536/8?u=sebi06
+#
+# https://www.learnpyqt.com/tutorials/qtableview-modelviews-numpy-pandas/
 
 
 from qtpy import QtCore, QtWidgets
