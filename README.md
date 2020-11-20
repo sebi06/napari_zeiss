@@ -9,9 +9,9 @@ Playing around with the Napari Viewer is fun. This example illustrates how to ad
 
 Disclaimer: This a prototype and just meant to be an example. Use at your own risk!
 
-![Viewer with FileOpen Dialog](../napari_zeiss/images/napari_filedialog.png)
+![Viewer with FileOpen Dialog](images/napari_filedialog.png)
 
-![Viewer with FileOpen Dialog](../napari_zeiss/images/napari_treeview.png)
+![Viewer with TreeView](images/napari_treeview.png)
 
 The main function to add the iamge stack to the viewer is shown below:
 
