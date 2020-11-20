@@ -154,11 +154,11 @@ class Open_files(QWidget):
 
         # remove open and cancel button from widget
         self.buttonBox = self.file_dialog.findChild(QDialogButtonBox, "buttonBox")
-        # self.buttonBox.clear()
+        self.buttonBox.clear()
 
-        btn = self.buttonBox.button(QDialogButtonBox.Cancel)
-        btn.setEnabled(False)
-        btn.setVisible(False)
+        #btn = self.buttonBox.button(QDialogButtonBox.Cancel)
+        # btn.setEnabled(False)
+        # btn.setVisible(False)
 
         # only open following file types
         self.file_dialog.setNameFilter("Images (*.czi *.ome.tiff *ome.tif *.tiff *.tif)")
@@ -336,10 +336,10 @@ with napari.gui_qt():
     viewer = napari.Viewer()
 
     # add a FileTree widget
-    viewer.window.add_dock_widget(filetree, name='filebrowser', area='right')
+    #viewer.window.add_dock_widget(filetree, name='filebrowser', area='right')
 
     # or add a FileDialogg widget
-    #viewer.window.add_dock_widget(filebrowser, name='filebrowser', area='right')
+    viewer.window.add_dock_widget(filebrowser, name='filebrowser', area='right')
 
     # add the Table widget for the metadata
     viewer.window.add_dock_widget(mdbrowser, name='mdbrowser', area='right')
