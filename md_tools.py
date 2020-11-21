@@ -222,11 +222,18 @@ def get_metadata_ometiff(filename, series=0):
 
     # get the scaling
     metadata['XScale'] = omemd.image(series).Pixels.PhysicalSizeX
+    metadata['XScale'] = np.round(metadata['XScale'], 3)
     # metadata['XScaleUnit'] = omemd.image(series).Pixels.PhysicalSizeXUnit
     metadata['YScale'] = omemd.image(series).Pixels.PhysicalSizeY
+    metadata['YScale'] = np.round(metadata['YScale'], 3)
     # metadata['YScaleUnit'] = omemd.image(series).Pixels.PhysicalSizeYUnit
     metadata['ZScale'] = omemd.image(series).Pixels.PhysicalSizeZ
+    metadata['ZScale'] = np.round(metadata['ZScale'], 3)
     # metadata['ZScaleUnit'] = omemd.image(series).Pixels.PhysicalSizeZUnit
+
+    # additional check for faulty z-scaling
+    if metadata['ZScale'] == 0.0:
+        metadata['ZScale'] = 1.0
 
     # get all image IDs
     for i in range(omemd.get_image_count()):
@@ -570,8 +577,8 @@ def get_metadata_czi(filename, dim2none=False,
         # metadata['Scaling'] = metadatadict_czi['ImageDocument']['Metadata']['Scaling']
         metadata['XScale'] = float(metadatadict_czi['ImageDocument']['Metadata']['Scaling']['Items']['Distance'][0]['Value']) * 1000000
         metadata['YScale'] = float(metadatadict_czi['ImageDocument']['Metadata']['Scaling']['Items']['Distance'][1]['Value']) * 1000000
-        # metadata['XScale'] = np.round(metadata['XScale'], 3)
-        # metadata['YScale'] = np.round(metadata['YScale'], 3)
+        metadata['XScale'] = np.round(metadata['XScale'], 3)
+        metadata['YScale'] = np.round(metadata['YScale'], 3)
         try:
             metadata['XScaleUnit'] = metadatadict_czi['ImageDocument']['Metadata']['Scaling']['Items']['Distance'][0]['DefaultUnitFormat']
             metadata['YScaleUnit'] = metadatadict_czi['ImageDocument']['Metadata']['Scaling']['Items']['Distance'][1]['DefaultUnitFormat']
@@ -581,7 +588,10 @@ def get_metadata_czi(filename, dim2none=False,
             metadata['YScaleUnit'] = None
         try:
             metadata['ZScale'] = float(metadatadict_czi['ImageDocument']['Metadata']['Scaling']['Items']['Distance'][2]['Value']) * 1000000
-            # metadata['ZScale'] = np.round(metadata['ZScale'], 3)
+            metadata['ZScale'] = np.round(metadata['ZScale'], 3)
+            # additional check for faulty z-scaling
+            if metadata['ZScale'] == 0.0:
+                metadata['ZScale'] = 1.0
             try:
                 metadata['ZScaleUnit'] = metadatadict_czi['ImageDocument']['Metadata']['Scaling']['Items']['Distance'][2]['DefaultUnitFormat']
             except KeyError as e:

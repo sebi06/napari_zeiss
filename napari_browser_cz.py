@@ -245,13 +245,13 @@ def show_image_napari(array, metadata,
             # cut out channel
             # use dask if array is a dask.array
             if isinstance(array, da.Array):
-                print('Extract Channel using Dask.Array')
+                print('Extract Channel as Dask.Array')
                 channel = array.compute().take(ch, axis=dimpos['C'])
                 new_dimstring = metadata['Axes_aics'].replace('C', '')
 
             else:
                 # use normal numpy if not
-                print('Extract Channel NumPy.Array')
+                print('Extract Channel as NumPy.Array')
                 channel = array.take(ch, axis=dimpos['C'])
                 new_dimstring = metadata['Axes_aics'].replace('C', '')
 
@@ -328,7 +328,7 @@ with napari.gui_qt():
     print('Working Directory : ', workdir)
 
     # create the classes
-    filebrowser = Open_files()
+    #filebrowser = Open_files()
     filetree = FileTree(workdir)
     mdbrowser = TableWidget()
 
@@ -336,10 +336,10 @@ with napari.gui_qt():
     viewer = napari.Viewer()
 
     # add a FileTree widget
-    #viewer.window.add_dock_widget(filetree, name='filebrowser', area='right')
+    viewer.window.add_dock_widget(filetree, name='filebrowser', area='right')
 
     # or add a FileDialogg widget
-    viewer.window.add_dock_widget(filebrowser, name='filebrowser', area='right')
+    #viewer.window.add_dock_widget(filebrowser, name='filebrowser', area='right')
 
     # add the Table widget for the metadata
     viewer.window.add_dock_widget(mdbrowser, name='mdbrowser', area='right')
