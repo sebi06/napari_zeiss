@@ -1134,12 +1134,10 @@ def writexml_ometiff(filename, xmlsuffix='_OMETIFF_MetaData.xml'):
         ext = '.ome.tif'
 
     with tifffile.TiffFile(filename) as tif:
-        # omexml_string = tif[0].image_description.decode('utf-8')
-        omexml_string = tif[0].image_description
+        omexml_string = tif.ome_metadata
 
     # get tree from string
-    # tree = ET.ElementTree(ET.fromstring(omexml_string.encode('utf-8')))
-    tree = ET.ElementTree(ET.fromstring(omexml_string))
+    tree = ET.ElementTree(ET.fromstring(omexml_string.encode('utf-8')))
 
     # change file name
     xmlfile = filename.replace(ext, xmlsuffix)
