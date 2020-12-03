@@ -11,7 +11,7 @@ Disclaimer: This a prototype and just meant to be an example. Use at your own ri
 
 ![Viewer with FileOpen Dialog](images/napari_filedialog.png)
 
-![Viewer with TreeView](images/napari_treeview.png)
+![Viewer with TreeView](images/napari_treeview_lls7.png)
 
 The main function to add the iamge stack to the viewer is shown below:
 
@@ -63,15 +63,13 @@ def show_image_napari(array, metadata,
             # cut out channel
             # use dask if array is a dask.array
             if isinstance(array, da.Array):
-                print('Extract Channel using Dask.Array')
+                print('Extract Channel as Dask.Array')
                 channel = array.compute().take(ch, axis=dimpos['C'])
-                new_dimstring = metadata['Axes_aics'].replace('C', '')
 
             else:
                 # use normal numpy if not
-                print('Extract Channel NumPy.Array')
+                print('Extract Channel as NumPy.Array')
                 channel = array.take(ch, axis=dimpos['C'])
-                new_dimstring = metadata['Axes_aics'].replace('C', '')
 
             # actually show the image array
             print('Adding Channel  : ', chname)
@@ -107,6 +105,11 @@ def show_image_napari(array, metadata,
         print('Adding Channel: ', chname)
         print('Scaling Factors: ', scalefactors)
 
+        # use dask if array is a dask.array
+        if isinstance(array, da.Array):
+            print('Extract Channel using Dask.Array')
+            array = array.compute()
+
         # get min-max values for initial scaling
         clim = imf.calc_scaling(array)
 
@@ -121,14 +124,30 @@ def show_image_napari(array, metadata,
 
         print('Renaming the Sliders based on the Dimension String ....')
 
-        # get the position of dimension entries after removing C dimension
-        dimpos_viewer = imf.get_dimpositions(new_dimstring)
+        if metadata['SizeC'] == 1:
 
-        # get the label of the sliders
-        sliders = viewer.dims.axis_labels
+            # get the position of dimension entries after removing C dimension
+            dimpos_viewer = imf.get_dimpositions(metadata['Axes_aics'])
 
-        # update the labels with the correct dimension strings
-        slidernames = ['B', 'S', 'T', 'Z']
+            # get the label of the sliders
+            sliders = viewer.dims.axis_labels
+
+            # update the labels with the correct dimension strings
+            slidernames = ['B', 'S', 'T', 'Z', 'C']
+
+        if metadata['SizeC'] > 1:
+
+            new_dimstring = metadata['Axes_aics'].replace('C', '')
+
+            # get the position of dimension entries after removing C dimension
+            dimpos_viewer = imf.get_dimpositions(new_dimstring)
+
+            # get the label of the sliders
+            sliders = viewer.dims.axis_labels
+
+            # update the labels with the correct dimension strings
+            slidernames = ['B', 'S', 'T', 'Z']
+
         for s in slidernames:
             if dimpos_viewer[s] >= 0:
                 sliders[dimpos_viewer[s]] = s
