@@ -88,11 +88,13 @@ def create_metadata_dict():
                 'Shape_czifile': None,
                 'czi_isRGB': None,
                 'czi_isMosaic': None,
-                'ObjNA': None,
-                'ObjMag': None,
-                'ObjID': None,
-                'ObjName': None,
-                'ObjImmersion': None,
+                'ObjNA': [],
+                'ObjMag': [],
+                'ObjID': [],
+                'ObjName': [],
+                'ObjImmersion': [],
+                'TubelensMag': [],
+                'ObjNominalMag': [],
                 'XScale': None,
                 'YScale': None,
                 'ZScale': None,
@@ -626,55 +628,119 @@ def get_metadata_czi(filename, dim2none=False,
         metadata['AcqDate'] = None
 
     # get objective data
-    try:
-        metadata['ObjName'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['Name']
-    except KeyError as e:
-        print('Key not found:', e)
-        metadata['ObjName'] = None
+    if isinstance(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'], list):
+        num_obj = len(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'])
+    else:
+        num_obj = 1
 
-    try:
-        metadata['ObjImmersion'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['Immersion']
-    except KeyError as e:
-        print('Key not found:', e)
-        metadata['ObjImmersion'] = None
+    # if there is only one objective found
+    if num_obj == 1:
+        try:
+            metadata['ObjName'].append(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                       ['Instrument']['Objectives']['Objective']['Name'])
+        except KeyError as e:
+            print('Key not found:', e)
+            metadata['ObjName'].append(None)
 
-    try:
-        metadata['ObjNA'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
-                                     ['Instrument']['Objectives']['Objective']['LensNA'])
-    except KeyError as e:
-        print('Key not found:', e)
-        metadata['ObjNA'] = None
+        try:
+            metadata['ObjImmersion'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['Immersion']
+        except KeyError as e:
+            print('Key not found:', e)
+            metadata['ObjImmersion'] = None
 
-    try:
-        metadata['ObjID'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['Id']
-    except KeyError as e:
-        print('Key not found:', e)
-        metadata['ObjID'] = None
+        try:
+            metadata['ObjNA'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                         ['Instrument']['Objectives']['Objective']['LensNA'])
+        except KeyError as e:
+            print('Key not found:', e)
+            metadata['ObjNA'] = None
 
-    try:
-        metadata['TubelensMag'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
-                                           ['Instrument']['TubeLenses']['TubeLens']['Magnification'])
-    except KeyError as e:
-        print('Key not found:', e, 'Using Default Value = 1.0 for Tublens Magnification.')
-        metadata['TubelensMag'] = 1.0
+        try:
+            metadata['ObjID'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['Id']
+        except KeyError as e:
+            print('Key not found:', e)
+            metadata['ObjID'] = None
 
-    try:
-        metadata['ObjNominalMag'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
-                                             ['Instrument']['Objectives']['Objective']['NominalMagnification'])
-    except KeyError as e:
-        print('Key not found:', e, 'Using Default Value = 1.0 for Nominal Magnification.')
-        metadata['ObjNominalMag'] = 1.0
+        try:
+            metadata['TubelensMag'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                               ['Instrument']['TubeLenses']['TubeLens']['Magnification'])
+        except KeyError as e:
+            print('Key not found:', e, 'Using Default Value = 1.0 for Tublens Magnification.')
+            metadata['TubelensMag'] = 1.0
 
-    try:
-        if metadata['TubelensMag'] is not None:
-            metadata['ObjMag'] = metadata['ObjNominalMag'] * metadata['TubelensMag']
-        if metadata['TubelensMag'] is None:
-            print('No TublensMag found. Use 1 instead')
-            metadata['ObjMag'] = metadata['ObjNominalMag'] * 1.0
+        try:
+            metadata['ObjNominalMag'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                 ['Instrument']['Objectives']['Objective']['NominalMagnification'])
+        except KeyError as e:
+            print('Key not found:', e, 'Using Default Value = 1.0 for Nominal Magnification.')
+            metadata['ObjNominalMag'] = 1.0
 
-    except KeyError as e:
-        print('Key not found:', e)
-        metadata['ObjMag'] = None
+        try:
+            if metadata['TubelensMag'] is not None:
+                metadata['ObjMag'] = metadata['ObjNominalMag'] * metadata['TubelensMag']
+            if metadata['TubelensMag'] is None:
+                print('No TublensMag found. Use 1 instead')
+                metadata['ObjMag'] = metadata['ObjNominalMag'] * 1.0
+
+        except KeyError as e:
+            print('Key not found:', e)
+            metadata['ObjMag'] = None
+
+    if num_obj > 1:
+        for o in range(num_obj):
+
+            try:
+                metadata['ObjName'].append(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                           ['Instrument']['Objectives']['Objective'][o]['Name'])
+            except KeyError as e:
+                print('Key not found:', e)
+                metadata['ObjName'].append(None)
+
+            try:
+                metadata['ObjImmersion'].append(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                ['Instrument']['Objectives']['Objective'][o]['Immersion'])
+            except KeyError as e:
+                print('Key not found:', e)
+                metadata['ObjImmersion'].append(None)
+
+            try:
+                metadata['ObjNA'].append(np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                  ['Instrument']['Objectives']['Objective'][o]['LensNA']))
+            except KeyError as e:
+                print('Key not found:', e)
+                metadata['ObjNA'].append(None)
+
+            try:
+                metadata['ObjID'].append(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                         ['Instrument']['Objectives']['Objective'][o]['Id'])
+            except KeyError as e:
+                print('Key not found:', e)
+                metadata['ObjID'].append(None)
+
+            try:
+                metadata['TubelensMag'].append(np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                        ['Instrument']['TubeLenses']['TubeLens'][o]['Magnification']))
+            except KeyError as e:
+                print('Key not found:', e, 'Using Default Value = 1.0 for Tublens Magnification.')
+                metadata['TubelensMag'].append(1.0)
+
+            try:
+                metadata['ObjNominalMag'].append(np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                          ['Instrument']['Objectives']['Objective'][o]['NominalMagnification']))
+            except KeyError as e:
+                print('Key not found:', e, 'Using Default Value = 1.0 for Nominal Magnification.')
+                metadata['ObjNominalMag'].append(1.0)
+
+            try:
+                if metadata['TubelensMag'] is not None:
+                    metadata['ObjMag'].append(metadata['ObjNominalMag'][o] * metadata['TubelensMag'][o])
+                if metadata['TubelensMag'] is None:
+                    print('No TublensMag found. Use 1 instead')
+                    metadata['ObjMag'].append(metadata['ObjNominalMag'][o] * 1.0)
+
+            except KeyError as e:
+                print('Key not found:', e)
+                metadata['ObjMag'].append(None)
 
     # get detector information
 

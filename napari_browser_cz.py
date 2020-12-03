@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
     QWidget,
     QTableWidget,
     QTableWidgetItem,
+    QCheckBox,
     QAbstractItemView
 
 )
@@ -142,6 +143,23 @@ class FileTree(QWidget):
         open_image_stack(filePath)
 
 
+class CheckBoxWidget(QWidget):
+
+    def __init__(self):
+        super(QWidget, self).__init__()
+        self.layout = QHBoxLayout(self)
+        self.cbox = QCheckBox("Use AICSImageIO Dask Delayed Reader", self)
+        self.layout.addWidget(self.cbox)
+        self.cbox.setChecked(True)
+
+        # adjust font
+        fnt = QFont()
+        fnt.setPointSize(9)
+        fnt.setBold(True)
+        fnt.setFamily("Arial")
+        self.cbox.setFont(fnt)
+
+
 class Open_files(QWidget):
 
     def __init__(self):
@@ -247,13 +265,11 @@ def show_image_napari(array, metadata,
             if isinstance(array, da.Array):
                 print('Extract Channel as Dask.Array')
                 channel = array.compute().take(ch, axis=dimpos['C'])
-                new_dimstring = metadata['Axes_aics'].replace('C', '')
 
             else:
                 # use normal numpy if not
                 print('Extract Channel as NumPy.Array')
                 channel = array.take(ch, axis=dimpos['C'])
-                new_dimstring = metadata['Axes_aics'].replace('C', '')
 
             # actually show the image array
             print('Adding Channel  : ', chname)
@@ -289,6 +305,11 @@ def show_image_napari(array, metadata,
         print('Adding Channel: ', chname)
         print('Scaling Factors: ', scalefactors)
 
+        # use dask if array is a dask.array
+        if isinstance(array, da.Array):
+            print('Extract Channel using Dask.Array')
+            array = array.compute()
+
         # get min-max values for initial scaling
         clim = imf.calc_scaling(array)
 
@@ -303,14 +324,30 @@ def show_image_napari(array, metadata,
 
         print('Renaming the Sliders based on the Dimension String ....')
 
-        # get the position of dimension entries after removing C dimension
-        dimpos_viewer = imf.get_dimpositions(new_dimstring)
+        if metadata['SizeC'] == 1:
 
-        # get the label of the sliders
-        sliders = viewer.dims.axis_labels
+            # get the position of dimension entries after removing C dimension
+            dimpos_viewer = imf.get_dimpositions(metadata['Axes_aics'])
 
-        # update the labels with the correct dimension strings
-        slidernames = ['B', 'S', 'T', 'Z']
+            # get the label of the sliders
+            sliders = viewer.dims.axis_labels
+
+            # update the labels with the correct dimension strings
+            slidernames = ['B', 'S', 'T', 'Z', 'C']
+
+        if metadata['SizeC'] > 1:
+
+            new_dimstring = metadata['Axes_aics'].replace('C', '')
+
+            # get the position of dimension entries after removing C dimension
+            dimpos_viewer = imf.get_dimpositions(new_dimstring)
+
+            # get the label of the sliders
+            sliders = viewer.dims.axis_labels
+
+            # update the labels with the correct dimension strings
+            slidernames = ['B', 'S', 'T', 'Z']
+
         for s in slidernames:
             if dimpos_viewer[s] >= 0:
                 sliders[dimpos_viewer[s]] = s
@@ -331,6 +368,7 @@ with napari.gui_qt():
     #filebrowser = Open_files()
     filetree = FileTree(workdir)
     mdbrowser = TableWidget()
+    checkbox = CheckBoxWidget()
 
     # create a viewer
     viewer = napari.Viewer()
@@ -340,6 +378,9 @@ with napari.gui_qt():
 
     # or add a FileDialogg widget
     #viewer.window.add_dock_widget(filebrowser, name='filebrowser', area='right')
+
+    # add widget
+    viewer.window.add_dock_widget(checkbox, name='checkbox', area='right')
 
     # add the Table widget for the metadata
     viewer.window.add_dock_widget(mdbrowser, name='mdbrowser', area='right')
