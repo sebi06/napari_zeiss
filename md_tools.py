@@ -616,21 +616,25 @@ def get_metadata_czi(filename, dim2none=False,
     try:
         metadata['SW-Name'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Application']['Name']
         metadata['SW-Version'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Application']['Version']
-    except KeyError as e:
-        print('Key not found:', e)
+    except (KeyError, TypeError) as e:
+        print(e)
         metadata['SW-Name'] = None
         metadata['SW-Version'] = None
 
     try:
         metadata['AcqDate'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Image']['AcquisitionDateAndTime']
-    except KeyError as e:
-        print('Key not found:', e)
+    except (KeyError, TypeError) as e:
+        print(e)
         metadata['AcqDate'] = None
 
     # get objective data
-    if isinstance(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'], list):
-        num_obj = len(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'])
-    else:
+    try:
+        if isinstance(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'], list):
+            num_obj = len(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'])
+        else:
+            num_obj = 1
+    except (KeyError, TypeError) as e:
+        print(e)
         num_obj = 1
 
     # if there is only one objective found
@@ -638,41 +642,41 @@ def get_metadata_czi(filename, dim2none=False,
         try:
             metadata['ObjName'].append(metadatadict_czi['ImageDocument']['Metadata']['Information']
                                        ['Instrument']['Objectives']['Objective']['Name'])
-        except KeyError as e:
-            print('Key not found:', e)
+        except (KeyError, TypeError) as e:
+            print(e)
             metadata['ObjName'].append(None)
 
         try:
             metadata['ObjImmersion'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['Immersion']
-        except KeyError as e:
-            print('Key not found:', e)
+        except (KeyError, TypeError) as e:
+            print(e)
             metadata['ObjImmersion'] = None
 
         try:
             metadata['ObjNA'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
                                          ['Instrument']['Objectives']['Objective']['LensNA'])
-        except KeyError as e:
-            print('Key not found:', e)
+        except (KeyError, TypeError) as e:
+            print(e)
             metadata['ObjNA'] = None
 
         try:
             metadata['ObjID'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['Id']
-        except KeyError as e:
-            print('Key not found:', e)
+        except (KeyError, TypeError) as e:
+            print(e)
             metadata['ObjID'] = None
 
         try:
             metadata['TubelensMag'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
                                                ['Instrument']['TubeLenses']['TubeLens']['Magnification'])
-        except KeyError as e:
-            print('Key not found:', e, 'Using Default Value = 1.0 for Tublens Magnification.')
+        except (KeyError, TypeError) as e:
+            print(e, 'Using Default Value = 1.0 for Tublens Magnification.')
             metadata['TubelensMag'] = 1.0
 
         try:
             metadata['ObjNominalMag'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
                                                  ['Instrument']['Objectives']['Objective']['NominalMagnification'])
-        except KeyError as e:
-            print('Key not found:', e, 'Using Default Value = 1.0 for Nominal Magnification.')
+        except (KeyError, TypeError) as e:
+            print(e, 'Using Default Value = 1.0 for Nominal Magnification.')
             metadata['ObjNominalMag'] = 1.0
 
         try:
@@ -682,8 +686,8 @@ def get_metadata_czi(filename, dim2none=False,
                 print('No TublensMag found. Use 1 instead')
                 metadata['ObjMag'] = metadata['ObjNominalMag'] * 1.0
 
-        except KeyError as e:
-            print('Key not found:', e)
+        except (KeyError, TypeError) as e:
+            print(e)
             metadata['ObjMag'] = None
 
     if num_obj > 1:
