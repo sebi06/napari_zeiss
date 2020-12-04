@@ -2,10 +2,13 @@
 
 #################################################################
 # File        : napari_browser_cz.py
-# Version     : 0.0.1
+# Version     : 0.0.2
 # Author      : czsrh
-# Date        : 18.11.2020
+# Date        : 04.12.2020
 # Institution : Carl Zeiss Microscopy GmbH
+#
+# Disclaimer: This tool is purely experimental. Feel free to
+# use it at your own risk.
 #
 # Copyright (c) 2020 Carl Zeiss AG, Germany. All Rights Reserved.
 #################################################################
