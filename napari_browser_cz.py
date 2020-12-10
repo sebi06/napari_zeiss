@@ -44,7 +44,7 @@ class TableWidget(QWidget):
 
     def __init__(self):
         super(QWidget, self).__init__()
-        self.layout = QHBoxLayout(self)
+        self.layout = QVBoxLayout(self)
         self.mdtable = QTableWidget()
         self.layout.addWidget(self.mdtable)
         self.mdtable.setShowGrid(True)
@@ -131,7 +131,7 @@ class FileTree(QWidget):
         header = self.tree.header()
         header.setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
 
-        windowLayout = QHBoxLayout()
+        windowLayout = QVBoxLayout()
         windowLayout.addWidget(self.tree)
         self.setLayout(windowLayout)
 
@@ -150,7 +150,8 @@ class CheckBoxWidget(QWidget):
 
     def __init__(self):
         super(QWidget, self).__init__()
-        self.layout = QHBoxLayout(self)
+        self.layout = QVBoxLayout(self)
+        self.setMaximumHeight(50)
         self.cbox = QCheckBox("Use AICSImageIO Dask Delayed Reader", self)
         self.layout.addWidget(self.cbox)
         self.cbox.setChecked(True)
@@ -161,6 +162,14 @@ class CheckBoxWidget(QWidget):
         fnt.setBold(True)
         fnt.setFamily("Arial")
         self.cbox.setFont(fnt)
+
+        # setting stylesheet
+        # changing width and height of indicator
+        self.cbox.setStyleSheet("QCheckBox::indicator"
+                                "{"
+                                "width :20px;"
+                                "height :20px;"
+                                "}")
 
 
 class Open_files(QWidget):

@@ -2,9 +2,9 @@
 
 #################################################################
 # File        : md_tools.py
-# Version     : 0.0.1
+# Version     : 0.0.2
 # Author      : czsrh
-# Date        : 18.11.2020
+# Date        : 10.12.2020
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Copyright (c) 2020 Carl Zeiss AG, Germany. All Rights Reserved.
@@ -316,7 +316,8 @@ def checkmdscale_none(md, tocheck=['ZScale'], replace=[1.0]):
 def get_metadata_czi(filename, dim2none=False,
                      forceDim=False,
                      forceDimname='SizeC',
-                     forceDimvalue=2):
+                     forceDimvalue=2,
+                     convert_scunit=True):
     """
     Returns a dictionary with CZI metadata.
 
@@ -339,6 +340,14 @@ def get_metadata_czi(filename, dim2none=False,
     :type filename: str
     :param dim2none: option to set non-existing dimension to None, defaults to False
     :type dim2none: bool, optional
+    :param forceDim: option to force to not read certain dimensions, defaults to False
+    :type forceDim: bool, optional
+    :param forceDimname: name of the dimension not to read, defaults to SizeC
+    :type forceDimname: str, optional
+    :param forceDimvalue: index of the dimension not to read, defaults to 2
+    :type forceDimvalue: int, optional      
+    :param convert_scunit: convert scale unit string from 'µm' to 'micron', defaults to False
+    :type convert_scunit: bool, optional  
     :return: metadata - dictionary with the relevant CZI metainformation
     :rtype: dict
     """
@@ -616,25 +625,21 @@ def get_metadata_czi(filename, dim2none=False,
     try:
         metadata['SW-Name'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Application']['Name']
         metadata['SW-Version'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Application']['Version']
-    except (KeyError, TypeError) as e:
-        print(e)
+    except KeyError as e:
+        print('Key not found:', e)
         metadata['SW-Name'] = None
         metadata['SW-Version'] = None
 
     try:
         metadata['AcqDate'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Image']['AcquisitionDateAndTime']
-    except (KeyError, TypeError) as e:
-        print(e)
+    except KeyError as e:
+        print('Key not found:', e)
         metadata['AcqDate'] = None
 
     # get objective data
-    try:
-        if isinstance(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'], list):
-            num_obj = len(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'])
-        else:
-            num_obj = 1
-    except (KeyError, TypeError) as e:
-        print(e)
+    if isinstance(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'], list):
+        num_obj = len(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'])
+    else:
         num_obj = 1
 
     # if there is only one objective found
@@ -642,41 +647,41 @@ def get_metadata_czi(filename, dim2none=False,
         try:
             metadata['ObjName'].append(metadatadict_czi['ImageDocument']['Metadata']['Information']
                                        ['Instrument']['Objectives']['Objective']['Name'])
-        except (KeyError, TypeError) as e:
-            print(e)
+        except KeyError as e:
+            print('Key not found:', e)
             metadata['ObjName'].append(None)
 
         try:
             metadata['ObjImmersion'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['Immersion']
-        except (KeyError, TypeError) as e:
-            print(e)
+        except KeyError as e:
+            print('Key not found:', e)
             metadata['ObjImmersion'] = None
 
         try:
             metadata['ObjNA'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
                                          ['Instrument']['Objectives']['Objective']['LensNA'])
-        except (KeyError, TypeError) as e:
-            print(e)
+        except KeyError as e:
+            print('Key not found:', e)
             metadata['ObjNA'] = None
 
         try:
             metadata['ObjID'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['Id']
-        except (KeyError, TypeError) as e:
-            print(e)
+        except KeyError as e:
+            print('Key not found:', e)
             metadata['ObjID'] = None
 
         try:
             metadata['TubelensMag'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
                                                ['Instrument']['TubeLenses']['TubeLens']['Magnification'])
-        except (KeyError, TypeError) as e:
-            print(e, 'Using Default Value = 1.0 for Tublens Magnification.')
+        except KeyError as e:
+            print('Key not found:', e, 'Using Default Value = 1.0 for Tublens Magnification.')
             metadata['TubelensMag'] = 1.0
 
         try:
             metadata['ObjNominalMag'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
                                                  ['Instrument']['Objectives']['Objective']['NominalMagnification'])
-        except (KeyError, TypeError) as e:
-            print(e, 'Using Default Value = 1.0 for Nominal Magnification.')
+        except KeyError as e:
+            print('Key not found:', e, 'Using Default Value = 1.0 for Nominal Magnification.')
             metadata['ObjNominalMag'] = 1.0
 
         try:
@@ -686,8 +691,8 @@ def get_metadata_czi(filename, dim2none=False,
                 print('No TublensMag found. Use 1 instead')
                 metadata['ObjMag'] = metadata['ObjNominalMag'] * 1.0
 
-        except (KeyError, TypeError) as e:
-            print(e)
+        except KeyError as e:
+            print('Key not found:', e)
             metadata['ObjMag'] = None
 
     if num_obj > 1:
@@ -955,6 +960,15 @@ def get_metadata_czi(filename, dim2none=False,
 
     # close AICSImage object
     czi_aics.close()
+
+    # convert scale unit tom avoid encoding problems
+    if convert_scunit:
+        if metadata['XScaleUnit'] == 'µm':
+            metadata['XScaleUnit'] = 'micron'
+        if metadata['YScaleUnit'] == 'µm':
+            metadata['YScaleUnit'] = 'micron'
+        if metadata['ZScaleUnit'] == 'µm':
+            metadata['ZScaleUnit'] = 'micron'
 
     return metadata
 
