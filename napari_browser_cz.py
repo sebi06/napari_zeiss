@@ -373,7 +373,7 @@ with napari.gui_qt():
 
     # define the parent directory
     # when using the FileTree one cannot navigate to higher levels from there
-    workdir = r'C:\Users\m1srh\OneDrive - Carl Zeiss AG\Testdata_Zeiss'
+    workdir = r'/datadisk1/tuxedo/testpictures/'
     print('Working Directory : ', workdir)
 
     # create the classes
