@@ -2,9 +2,9 @@
 
 #################################################################
 # File        : napari_browser_cz.py
-# Version     : 0.0.4
+# Version     : 0.0.6
 # Author      : czsrh
-# Date        : 16.01.2020
+# Date        : 18.01.2020
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Disclaimer: This tool is purely experimental. Feel free to
@@ -47,6 +47,7 @@ from aicsimageio import AICSImage
 import dask.array as da
 import os
 from zencontrol import ZenExperiment, ZenDocuments
+from pathlib import Path
 
 
 class TableWidget(QWidget):
@@ -63,6 +64,7 @@ class TableWidget(QWidget):
 
     def update_metadata(self, metadata):
 
+        # number of rows is set to number of metadata entries
         row_count = len(metadata)
         col_count = 2
         self.mdtable.setColumnCount(col_count)
@@ -70,6 +72,7 @@ class TableWidget(QWidget):
 
         row = 0
 
+        # update the table with the entries from metadata dictionary
         for key, value in metadata.items():
             newkey = QTableWidgetItem(key)
             self.mdtable.setItem(row, 0, newkey)
@@ -82,7 +85,7 @@ class TableWidget(QWidget):
 
     def update_style(self):
 
-        # define font
+        # define font size and type
         fnt = QFont()
         fnt.setPointSize(11)
         fnt.setBold(True)
@@ -107,6 +110,7 @@ class FileTree(QWidget):
 
         filter = ['*.czi', '*.ome.tiff', '*ome.tif' '*.tiff' '*.tif']
 
+        # define the style for the FileTree via s style sheet
         self.setStyleSheet("""
             QTreeView::item {
             background-color: rgb(38, 41, 48);
@@ -149,11 +153,12 @@ class FileTree(QWidget):
     @pyqtSlot()
     def on_treeView_clicked(self, index):
         indexItem = self.model.index(index.row(), 0, index.parent())
-        fileName = self.model.fileName(indexItem)
-        filePath = self.model.filePath(indexItem)
+        filename = self.model.fileName(indexItem)
+        filepath = self.model.filePath(indexItem)
 
-        print('Opening ImageFile : ', filePath)
-        open_image_stack(filePath)
+        # open the file when clicked
+        print('Opening ImageFile : ', filepath)
+        open_image_stack(filepath)
 
 
 class OptionsWidget(QWidget):
@@ -166,7 +171,7 @@ class OptionsWidget(QWidget):
         self.grid_opt.setSpacing(10)
         self.setLayout(self.grid_opt)
 
-        # add widgets to the grid layout
+        # add checkbox to use Dask Delayed reader to the grid layout
         self.cbox_dask = QCheckBox("Use AICSImageIO Dask Reader", self)
         self.cbox_dask.setChecked(True)
         self.cbox_dask.setStyleSheet("font:bold;"
@@ -176,7 +181,8 @@ class OptionsWidget(QWidget):
                                      )
         self.grid_opt.addWidget(self.cbox_dask, 0, 0)
 
-        self.cbox_openczi = QCheckBox("Open CZI after Experiment Execution", self)
+        # add checkbox to open CZI after the experiment execution
+        self.cbox_openczi = QCheckBox("Open CZI after Acquisition", self)
         self.cbox_openczi.setChecked(True)
         self.cbox_openczi.setStyleSheet("font:bold;"
                                         "font-size: 10px;"
@@ -201,7 +207,7 @@ class FileBrowser(QWidget):
         self.buttonBox = self.file_dialog.findChild(QDialogButtonBox, "buttonBox")
         self.buttonBox.clear()
 
-        # only open following file types
+        # only show the following file types
         self.file_dialog.setNameFilter("Images (*.czi *.ome.tiff *ome.tif *.tiff *.tif)")
         self.layout.addWidget(self.file_dialog)
         self.file_dialog.currentChanged.connect(open_image_stack)
@@ -255,20 +261,22 @@ class StartExperiment(QWidget):
     @pyqtSlot()
     def on_click(self):
 
-        # finding the content of current item in combo box
+        # get name of the selected experiment
         current_exp = self.expselect.currentText()
         print('Selected ZEN Experiment : ', current_exp)
 
-        # get the CZI name to be used
+        # get the desired savename
         desired_cziname = self.nameedit.text()
 
-        # disable the button
+        # disable the button while the experiment is running
         self.startexpbutton.setEnabled(False)
         self.startexpbutton.setText('Running ...')
+
+        # not nice, but this "redraws" the button
         # QtCore.QApplication.processEvents()
         QtWidgets.QApplication.processEvents()
 
-        # initialize the experiment
+        # initialize the experiment with parameters
         czexp = ZenExperiment(experiment=current_exp,
                               savefolder=savefolder,
                               cziname=desired_cziname)
@@ -277,23 +285,24 @@ class StartExperiment(QWidget):
         self.saved_czifilepath = czexp.startexperiment()
         print('Saved CZI : ', self.saved_czifilepath)
 
-        # enable the button again
+        # enable the button again when experiment is over
         self.startexpbutton.setEnabled(True)
         self.startexpbutton.setText('Run Experiment')
 
         # not nice, but this "redraws" the button
         QtWidgets.QApplication.processEvents()
 
-        # open the just recorded CZI image
+        # option to use Dask Delayed reader
         use_dask = checkboxes.cbox_dask.isChecked()
         print("Use Dask Reader : ", use_dask)
 
+        # open the just acquired CZI and show it inside napari viewer
         if self.saved_czifilepath is not None:
             open_image_stack(self.saved_czifilepath, use_dask)
 
 
-def open_image_stack(path, use_dask=False):
-    """ Open a file using AICSImageIO and display it using Napari
+def open_image_stack(filepath, use_dask=False):
+    """ Open a file using AICSImageIO and display it using napari
 
     :param path: filepath of the image
     :type path: str
@@ -301,21 +310,21 @@ def open_image_stack(path, use_dask=False):
     :type use_dask: bool, optional
     """
 
-    if os.path.isfile(path):
+    if os.path.isfile(filepath):
 
         # remove existing layers from napari
         viewer.layers.select_all()
         viewer.layers.remove_selected()
 
         # get the metadata
-        metadata, add_metadata = imf.get_metadata(path)
+        metadata, add_metadata = imf.get_metadata(filepath)
 
         # add the metadata and adapt the table display
         mdbrowser.update_metadata(metadata)
         mdbrowser.update_style()
 
         # get AICSImageIO object
-        img = AICSImage(path)
+        img = AICSImage(filepath)
 
         if not use_dask:
             stack = img.get_image_data()
@@ -333,17 +342,17 @@ def show_image_napari(array, metadata,
                       blending='additive',
                       gamma=0.75,
                       rename_sliders=False):
-    """Show the multidimensional array using the Napari viewer
+    """Show the multidimensional array using the napari viewer
 
     :param array: multidimensional NumPy.Array containing the pixeldata
     :type array: NumPy.Array
     :param metadata: dictionary with CZI or OME-TIFF metadata
     :type metadata: dict
-    :param blending: Napari viewer option for blending, defaults to 'additive'
+    :param blending: napari viewer option for blending, defaults to 'additive'
     :type blending: str, optional
-    :param gamma: Napari viewer value for Gamma, defaults to 0.85
+    :param gamma: napari viewer value for Gamma, defaults to 0.85
     :type gamma: float, optional
-    :param rename_sliders: name slider with correct labels output, defaults to False
+    :param rename_sliders: name slider with correct labels, defaults to False
     :type verbose: bool, optional
     """
 
@@ -467,18 +476,18 @@ def show_image_napari(array, metadata,
             if dimpos_viewer[s] >= 0:
                 try:
                     # this seems to work for napari <= 0.4.2
-                    
+
                     # assign the dimension labels
                     sliders[dimpos_viewer[s]] = s
                 except TypeError:
                     # this works for napari >= 0.4.3
-                    
+
                     # convert to list()
                     tmp_sliders = list(sliders)
-                    
+
                     # assign the dimension labels
                     tmp_sliders[dimpos_viewer[s]] = s
-                    
+
                     # convert back to tuple
                     sliders = tuple(tmp_sliders)
 
@@ -486,78 +495,95 @@ def show_image_napari(array, metadata,
         viewer.dims.axis_labels = sliders
 
 
-def check_folder(folderpath):
-    """ Check if  folder exits.
+def get_zenfolders(zen_subfolder='Experiment Setups'):
+    """Get the absolute path for a specific ZEN folder.
 
-    :param folderpath: path of the folder to be checked
-    :type folderpath: str
-    :return: Boolean
+    :param zen_subfolder: Name of a specific subfolder, defaults to 'Experiment Setups'
+    :type zen_subfolder: str, optional
+    :return: specific zensubfolder path
     :rtype: str
     """
-    # check if the ZEN experiment folder was found
-    folder_check = os.path.isdir(folderpath)
-    if folder_check is True:
-        print(folderpath + " is a valid directory.")
-    else:
-        print(folderpath + "  is NOT a valid directory")
 
-    return folder_check
+    zenfolder = None
+    zensubfolder = None
 
+    # get the user folder
+    userhome = str(Path.home())
 
+    # construct the Zen Document folder and check
+    zenfolder = os.path.join(userhome, r'Documents\Carl Zeiss\ZEN\Documents')
 
-##################################################
+    if os.path.isdir(zenfolder):
+        zensubfolder = os.path.join(zenfolder, zen_subfolder)
+    if not os.path.isdir(zenfolder):
+        print('ZEN Folder: ' + zenfolder + 'not found')
 
-# make sure this location is correct
-zenexpfolder = r'e:\Sebastian\Documents\Carl Zeiss\ZEN\Documents\Experiment Setups'
-savefolder = r'E:\tuxedo\zen_output'
+    return zensubfolder
 
-# check if the ZEN experiment folder was found
-expfolder_exists = check_folder(zenexpfolder)
-savefolder_exits = check_folder(savefolder)
-
-# default for saving an CZI image fafter acquistion
-default_cziname = 'myimage.czi'
-
-# get lists with existing experiment files
-expdocs = ZenDocuments()
-expfiles_long, expfiles_short = expdocs.getfilenames(folder=zenexpfolder,
-                                                     pattern='*.czexp')
-
-# decide what widget to use - 'tree' or 'dialog'
-fileselect = 'dialog'
 
 ###########################################################
 
-# start the main application
-with napari.gui_qt():
+if __name__ == "__main__":
 
-    # define the parent directory
-    # when using the FileTree one cannot navigate to higher levels from there
-    print('Working Directory : ', savefolder)
+    # make sure this location is correct if you specify this
+    savefolder = r'C:\Users\m1srh\Documents\Zen_Output'
+    if os.path.isdir(savefolder):
+        print('SaveFolder : ', savefolder, 'found.')
+    if not os.path.isdir(savefolder):
+        print('SaveFolder : ', savefolder, 'not found.')
 
-    # create a viewer
-    viewer = napari.Viewer()
+    # specify directly or try to discover folder automatically
+    #zenexpfolder = r'c:\Users\testuser\Documents\Carl Zeiss\ZEN\Documents\Experiment Setups'
+    zenexpfolder = get_zenfolders(zen_subfolder='Experiment Setups')
 
-    if fileselect == 'tree':
-        # add a FileTree widget
-        filetree = FileTree(defaultfolder=savefolder)
-        fbwidget = viewer.window.add_dock_widget(filetree, name='filebrowser', area='right')
+    # check if the ZEN experiment folder was found
+    if zenexpfolder is not None:
+        print('ZEN Experiment Setups Folder : ', zenexpfolder, 'found.')
+        # get lists with existing experiment files
+        expdocs = ZenDocuments()
+        expfiles_long, expfiles_short = expdocs.getfilenames(folder=zenexpfolder,
+                                                             pattern='*.czexp')
 
-    if fileselect == 'dialog':
-        # add a FileDialogg widget
-        filebrowser = FileBrowser(defaultfolder=savefolder)
-        fbwidget = viewer.window.add_dock_widget(filebrowser, name='filebrowser', area='right')
+    if zenexpfolder is None:
+        expfiles_long = []
+        expfiles_short = []
 
-    # create the widget elements
-    mdbrowser = TableWidget()
-    checkboxes = OptionsWidget()
-    expselect = StartExperiment(default_cziname=default_cziname)
+    # default for saving an CZI image after acquisition
+    default_cziname = 'myimage.czi'
 
-    # add widget to activate the dask delayed reading
-    cbwidget = viewer.window.add_dock_widget(checkboxes, name='checkbox', area='bottom')
+    # decide what widget to use - 'tree' or 'dialog'
+    fileselect = 'dialog'
 
-    # add the Table widget for the metadata
-    mdwidget = viewer.window.add_dock_widget(mdbrowser, name='mdbrowser', area='right')
+    # start the main application
+    with napari.gui_qt():
 
-    # add the Experiment Selector widget
-    expwidget = viewer.window.add_dock_widget(expselect, name='expselect', area='bottom')
+        # define the parent directory
+        # when using the FileTree one cannot navigate to higher levels
+        print('Image Directory : ', savefolder)
+
+        # create the napari viewer
+        viewer = napari.Viewer()
+
+        if fileselect == 'tree':
+            # add a FileTree widget
+            filetree = FileTree(defaultfolder=savefolder)
+            fbwidget = viewer.window.add_dock_widget(filetree, name='filebrowser', area='right')
+
+        if fileselect == 'dialog':
+            # add a FileDialogg widget
+            filebrowser = FileBrowser(defaultfolder=savefolder)
+            fbwidget = viewer.window.add_dock_widget(filebrowser, name='filebrowser', area='right')
+
+        # create the widget elements
+        mdbrowser = TableWidget()
+        checkboxes = OptionsWidget()
+        expselect = StartExperiment(default_cziname=default_cziname)
+
+        # add widget to activate the dask delayed reading
+        cbwidget = viewer.window.add_dock_widget(checkboxes, name='checkbox', area='bottom')
+
+        # add the Table widget for the metadata
+        mdwidget = viewer.window.add_dock_widget(mdbrowser, name='mdbrowser', area='right')
+
+        # add the Experiment Selector widget
+        expwidget = viewer.window.add_dock_widget(expselect, name='expselect', area='bottom')
