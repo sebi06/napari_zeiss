@@ -1,5 +1,7 @@
 # napari_zeiss
 
+## Simple Viewing Images
+
 Playing around with the Napari Viewer is fun. This example illustrates how to add wto widgets to the viewer.
 
 - 1st widget can be:
@@ -20,17 +22,17 @@ def show_image_napari(array, metadata,
                       blending='additive',
                       gamma=0.75,
                       rename_sliders=False):
-    """Show the multidimensional array using the Napari viewer
+    """Show the multidimensional array using the napari viewer
 
     :param array: multidimensional NumPy.Array containing the pixeldata
     :type array: NumPy.Array
     :param metadata: dictionary with CZI or OME-TIFF metadata
     :type metadata: dict
-    :param blending: NapariViewer option for blending, defaults to 'additive'
+    :param blending: napari viewer option for blending, defaults to 'additive'
     :type blending: str, optional
-    :param gamma: NapariViewer value for Gamma, defaults to 0.85
+    :param gamma: napari viewer value for Gamma, defaults to 0.85
     :type gamma: float, optional
-    :param rename_sliders: name slider with correct labels output, defaults to False
+    :param rename_sliders: name slider with correct labels, defaults to False
     :type verbose: bool, optional
     """
 
@@ -143,6 +145,8 @@ def show_image_napari(array, metadata,
             dimpos_viewer = imf.get_dimpositions(new_dimstring)
 
             # get the label of the sliders
+            # for napari <= 0.4.2 this returns a list
+            # and >= 0.4.3 it will return a tuple
             sliders = viewer.dims.axis_labels
 
             # update the labels with the correct dimension strings
@@ -150,8 +154,43 @@ def show_image_napari(array, metadata,
 
         for s in slidernames:
             if dimpos_viewer[s] >= 0:
-                sliders[dimpos_viewer[s]] = s
+                try:
+                    # this seems to work for napari <= 0.4.2
+
+                    # assign the dimension labels
+                    sliders[dimpos_viewer[s]] = s
+                except TypeError:
+                    # this works for napari >= 0.4.3
+
+                    # convert to list()
+                    tmp_sliders = list(sliders)
+
+                    # assign the dimension labels
+                    tmp_sliders[dimpos_viewer[s]] = s
+
+                    # convert back to tuple
+                    sliders = tuple(tmp_sliders)
 
         # apply the new labels to the viewer
         viewer.dims.axis_labels = sliders
 ```
+
+## Start a ZEN experiment from the Napari viewer
+
+The Napari viewer allows to add even more interesting widgets. As a "fun project" it is possible to start a ZEN experiment from with Napari by sending ZEN python commands over TCP-IP.
+
+For more information about controlling see: [ZEN Blue - TCP-IP Interface](https://github.com/zeiss-microscopy/OAD/tree/master/Interfaces/TCP-IP_interface)
+
+In order to start an experiment from Napari there are a few new widgets:
+
+- Selector for ZEN Experiments (*.czexp)
+- Button **Run Experiment** to actually start a pre-configured in ZEN Blue
+- Option to open an newly acquired CZI directly after the experiment is finished
+
+![Napari Viewer with ZEN Control](images/napari_zen_tcpip1.png)
+
+***
+
+<video width="640" height="480" controls>
+  <source src="images/Napari_simulated_CD7_TCPIP_Run_Experiment.mp4" type="video/mp4">
+</video>
