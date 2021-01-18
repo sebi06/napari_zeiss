@@ -15,7 +15,29 @@ Disclaimer: This a prototype and just meant to be an example. Use at your own ri
 
 ![Viewer with TreeView](images/napari_treeview_lls7.png)
 
-The main function to add the iamge stack to the viewer is shown below:
+## Start a ZEN experiment from the Napari viewer
+
+The Napari viewer allows to add even more interesting widgets. As a "fun project" it is possible to start a ZEN experiment from with Napari by sending ZEN python commands over TCP-IP.
+
+For more information about controlling see: [ZEN Blue - TCP-IP Interface](https://github.com/zeiss-microscopy/OAD/tree/master/Interfaces/TCP-IP_interface)
+
+In order to start an experiment from Napari there are a few new widgets:
+
+- Selector for ZEN Experiments (*.czexp)
+- Button **Run Experiment** to actually start a pre-configured in ZEN Blue
+- Option to open an newly acquired CZI directly after the experiment is finished
+
+![Napari Viewer with ZEN Control](images/napari_zen_tcpip1.png)
+
+***
+
+![Napari Viewer with ZEN Control in Action](images/Napari_simulated_CD7_TCPIP_Run_Experiment2.gif)
+
+***
+
+## Main code part to show the image inside Napari
+
+The main function to add the image stack to the viewer is shown below:
 
 ```python
 def show_image_napari(array, metadata,
@@ -175,22 +197,8 @@ def show_image_napari(array, metadata,
         viewer.dims.axis_labels = sliders
 ```
 
-## Start a ZEN experiment from the Napari viewer
+## Disclaimer
 
-The Napari viewer allows to add even more interesting widgets. As a "fun project" it is possible to start a ZEN experiment from with Napari by sending ZEN python commands over TCP-IP.
+**This is an collection of scripts and tools free to use for everybody. Use it on your own risk. Especially be aware of the fact that automated stage movements might damage hardware if one starts an experiment and the the system is not setup properly. Please check everything in simulation mode first!**
 
-For more information about controlling see: [ZEN Blue - TCP-IP Interface](https://github.com/zeiss-microscopy/OAD/tree/master/Interfaces/TCP-IP_interface)
-
-In order to start an experiment from Napari there are a few new widgets:
-
-- Selector for ZEN Experiments (*.czexp)
-- Button **Run Experiment** to actually start a pre-configured in ZEN Blue
-- Option to open an newly acquired CZI directly after the experiment is finished
-
-![Napari Viewer with ZEN Control](images/napari_zen_tcpip1.png)
-
-***
-
-<video width="640" height="480" controls>
-  <source src="images/Napari_simulated_CD7_TCPIP_Run_Experiment.mp4" type="video/mp4">
-</video>
+By using tools tools and scripts you agree to this disclaimer.
