@@ -2,9 +2,9 @@
 
 #################################################################
 # File        : zentcontrol.py
-# Version     : 0.2
+# Version     : 0.3
 # Author      : czsrh
-# Date        : 11.01.2020
+# Date        : 18.01.2020
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Disclaimer: This tool is purely experimental. Feel free to
@@ -68,7 +68,7 @@ class ZenExperiment():
         # in case the czi does not already exist
         if self.cziname not in czifiles_short:
 
-            # define the lists of commands to be send using the TCP-IP connection to ZEN
+            # define the lists of commands to be send
             commandlist = ['from System.IO import File, Directory, Path',
                            'outputfolder = r"' + self.savefolder + '"',
                            'exp = Zen.Acquisition.Experiments.GetByName(r"' + self.experiment + '")',
@@ -155,8 +155,9 @@ class ZenTCPIP():
                 success = True
                 print('Opened Port: ', port)
                 break
-            except:
-                print("tcp_open_port: Unexpected error:", sys.exc_info()[0])
+            except Exception as e:
+                # print("type error: " + str(e)):
+                print("tcp_open_port: Unexpected error:", e)
 
             # wait for a moment
             time.sleep(1)
@@ -165,9 +166,9 @@ class ZenTCPIP():
 
         line = telnet.read_until(os.linesep.encode('ascii'), 1)
         # show output to check if it is really working
-        print('Recieved line: ', line.decode('utf-8'))
+        print('Received line: ', line.decode('utf-8'))
 
-        if line == b'Welcome to ZEN PythonScript\r\n':
+        if line == b'Welcome to ZEN Python Scripting\r\n':
             return telnet
         else:
             return 0
