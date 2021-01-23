@@ -41,6 +41,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtGui import QFont
 
 import napari
+#from napari_plugin_engine import napari_hook_implementation
 import numpy as np
 import md_tools as imf
 from aicsimageio import AICSImage
@@ -579,7 +580,7 @@ if __name__ == "__main__":
 
         # create the widget elements
         mdbrowser = TableWidget()
-        checkboxes = OptionsWidget()
+        #checkboxes = OptionsWidget()
         expselect = StartExperiment(default_cziname=default_cziname)
 
         # add widget to activate the dask delayed reading
@@ -590,3 +591,5 @@ if __name__ == "__main__":
 
         # add the Experiment Selector widget
         expwidget = viewer.window.add_dock_widget(expselect, name='expselect', area='bottom')
+
+    
