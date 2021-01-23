@@ -509,7 +509,7 @@ def check_folder(folderpath):
 
 # make sure this location is correct
 zenexpfolder = r'e:\Sebastian\Documents\Carl Zeiss\ZEN\Documents\Experiment Setups'
-savefolder = r'E:\tuxedo\zen_output'
+savefolder = r'e:\tuxedo\zen_output'
 
 # check if the ZEN experiment folder was found
 expfolder_exists = check_folder(zenexpfolder)
