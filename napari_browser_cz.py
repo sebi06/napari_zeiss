@@ -2,9 +2,9 @@
 
 #################################################################
 # File        : napari_browser_cz.py
-# Version     : 0.0.6
+# Version     : 0.0.7
 # Author      : czsrh
-# Date        : 18.01.2020
+# Date        : 23.01.2020
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Disclaimer: This tool is purely experimental. Feel free to
@@ -526,7 +526,9 @@ def get_zenfolders(zen_subfolder='Experiment Setups'):
 if __name__ == "__main__":
 
     # make sure this location is correct if you specify this
-    savefolder = r'C:\Users\m1srh\Documents\Zen_Output'
+    #savefolder = r'C:\Users\m1srh\Documents\Zen_Output'
+    savefolder = r'e:\tuxedo\zen_output'
+    
     if os.path.isdir(savefolder):
         print('SaveFolder : ', savefolder, 'found.')
     if not os.path.isdir(savefolder):
@@ -534,7 +536,8 @@ if __name__ == "__main__":
 
     # specify directly or try to discover folder automatically
     #zenexpfolder = r'c:\Users\testuser\Documents\Carl Zeiss\ZEN\Documents\Experiment Setups'
-    zenexpfolder = get_zenfolders(zen_subfolder='Experiment Setups')
+    zenexpfolder = r'e:\Sebastian\Documents\Carl Zeiss\ZEN\Documents\Experiment Setups'
+    #zenexpfolder = get_zenfolders(zen_subfolder='Experiment Setups')
 
     # check if the ZEN experiment folder was found
     if zenexpfolder is not None:

@@ -2,9 +2,9 @@
 
 #################################################################
 # File        : zentcontrol.py
-# Version     : 0.3
+# Version     : 0.4
 # Author      : czsrh
-# Date        : 18.01.2020
+# Date        : 23.01.2020
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Disclaimer: This tool is purely experimental. Feel free to
@@ -168,7 +168,7 @@ class ZenTCPIP():
         # show output to check if it is really working
         print('Received line: ', line.decode('utf-8'))
 
-        if line == b'Welcome to ZEN Python Scripting\r\n':
+        if line == b'Welcome to ZEN PythonScript\r\n':
             return telnet
         else:
             return 0
