@@ -105,7 +105,7 @@ class TableWidget(QWidget):
 
 class FileTree(QWidget):
 
-    def __init__(self, workdir):
+    def __init__(self, defaultfolder=r'c:\Zen_Output'):
         super(QWidget, self).__init__()
 
         filter = ['*.czi', '*.ome.tiff', '*ome.tif' '*.tiff' '*.tif']
@@ -130,14 +130,14 @@ class FileTree(QWidget):
             """)
 
         self.model = QFileSystemModel()
-        self.model.setRootPath(workdir)
+        self.model.setRootPath(defaultfolder)
         self.model.setFilter(QtCore.QDir.AllDirs | QDir.Files | QtCore.QDir.NoDotAndDotDot)
         self.model.setNameFilterDisables(False)
         self.model.setNameFilters(filter)
 
         self.tree = QTreeView()
         self.tree.setModel(self.model)
-        self.tree.setRootIndex(self.model.index(workdir))
+        self.tree.setRootIndex(self.model.index(defaultfolder))
         self.tree.setAnimated(True)
         self.tree.setIndentation(20)
         self.tree.setSortingEnabled(False)
