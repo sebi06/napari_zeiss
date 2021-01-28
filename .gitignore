@@ -131,3 +131,4 @@ napari_browser_cz.py
 .idea/modules.xml
 .idea/inspectionProfiles/profiles_settings.xml
 .vscode/settings.json
+/.vs

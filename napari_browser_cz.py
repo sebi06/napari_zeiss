@@ -580,7 +580,7 @@ if __name__ == "__main__":
 
         # create the widget elements
         mdbrowser = TableWidget()
-        #checkboxes = OptionsWidget()
+        checkboxes = OptionsWidget()
         expselect = StartExperiment(default_cziname=default_cziname)
 
         # add widget to activate the dask delayed reading
