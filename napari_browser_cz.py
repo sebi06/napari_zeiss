@@ -2,15 +2,18 @@
 
 #################################################################
 # File        : napari_browser_cz.py
-# Version     : 0.0.7
+# Version     : 0.0.8
 # Author      : czsrh
-# Date        : 23.01.2020
+# Date        : 31.01.2021
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Disclaimer: This tool is purely experimental. Feel free to
-# use it at your own risk.
+# use it at your own risk. Especially be aware of the fact
+# that automated stage movements might damage hardware if
+# one starts an experiment and the the system is not setup properly.
+# Please check everything in simulation mode first!
 #
-# Copyright (c) 2020 Carl Zeiss AG, Germany. All Rights Reserved.
+# Copyright (c) 2021 Carl Zeiss AG, Germany. All Rights Reserved.
 #
 #################################################################
 
@@ -41,9 +44,9 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtGui import QFont
 
 import napari
-#from napari_plugin_engine import napari_hook_implementation
 import numpy as np
-import md_tools as imf
+import imgfile_tools as imf
+#from czitools import imgfile_tools as imf
 from aicsimageio import AICSImage
 import dask.array as da
 import os
@@ -529,7 +532,7 @@ if __name__ == "__main__":
     # make sure this location is correct if you specify this
     #savefolder = r'C:\Users\m1srh\Documents\Zen_Output'
     savefolder = r'e:\tuxedo\zen_output'
-    
+
     if os.path.isdir(savefolder):
         print('SaveFolder : ', savefolder, 'found.')
     if not os.path.isdir(savefolder):
@@ -591,5 +594,3 @@ if __name__ == "__main__":
 
         # add the Experiment Selector widget
         expwidget = viewer.window.add_dock_widget(expselect, name='expselect', area='bottom')
-
-    
