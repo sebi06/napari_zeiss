@@ -335,11 +335,19 @@ def open_image_stack(filepath, use_dask=False):
         if use_dask:
             stack = img.get_image_dask_data()
 
+        """
         # add the image stack to the napari viewer
         show_image_napari(stack, metadata,
                           blending='additive',
                           gamma=0.85,
                           rename_sliders=True)
+        """
+
+        imf.show_napari2(viewer, stack, metadata,
+                         blending='additive',
+                         gamma=0.85,
+                         add_mdtable=False,
+                         rename_sliders=True)
 
 
 def show_image_napari(array, metadata,

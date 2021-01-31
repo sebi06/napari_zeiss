@@ -1271,13 +1271,15 @@ def calc_scaling(data, corr_min=1.0,
     return [minvalue, maxvalue]
 
 
-def show_napari(array, metadata,
+def show_napari(viewer, array, metadata,
                 blending='additive',
                 gamma=0.85,
                 add_mdtable=True,
                 rename_sliders=False):
     """Show the multidimensional array using the Napari viewer
 
+    :param viwer: Instnave of the napari viewer
+    :type array: NapariViewer
     :param array: multidimensional NumPy.Array containing the pixeldata
     :type array: NumPy.Array
     :param metadata: dictionary with CZI or OME-TIFF metadata
@@ -1313,8 +1315,6 @@ def show_napari(array, metadata,
 
         # initialize the napari viewer
         print('Initializing Napari Viewer ...')
-
-        # create a viewer and add some images
         viewer = napari.Viewer()
 
         # add widget for metadata
@@ -1416,7 +1416,7 @@ def show_napari(array, metadata,
         if metadata['SizeC'] == 1:
 
             # get the position of dimension entries after removing C dimension
-            dimpos_viewer = imf.get_dimpositions(metadata['Axes_aics'])
+            dimpos_viewer = get_dimpositions(metadata['Axes_aics'])
 
             # get the label of the sliders
             sliders = viewer.dims.axis_labels
@@ -1429,7 +1429,194 @@ def show_napari(array, metadata,
             new_dimstring = metadata['Axes_aics'].replace('C', '')
 
             # get the position of dimension entries after removing C dimension
-            dimpos_viewer = imf.get_dimpositions(new_dimstring)
+            dimpos_viewer = get_dimpositions(new_dimstring)
+
+            # get the label of the sliders
+            # for napari <= 0.4.2 this returns a list
+            # and >= 0.4.3 it will return a tuple
+            sliders = viewer.dims.axis_labels
+
+            # update the labels with the correct dimension strings
+            slidernames = ['B', 'S', 'T', 'Z']
+
+        for s in slidernames:
+            if dimpos_viewer[s] >= 0:
+                try:
+                    # this seems to work for napari <= 0.4.2
+
+                    # assign the dimension labels
+                    sliders[dimpos_viewer[s]] = s
+                except TypeError:
+                    # this works for napari >= 0.4.3
+
+                    # convert to list()
+                    tmp_sliders = list(sliders)
+
+                    # assign the dimension labels
+                    tmp_sliders[dimpos_viewer[s]] = s
+
+                    # convert back to tuple
+                    sliders = tuple(tmp_sliders)
+
+        # apply the new labels to the viewer
+        viewer.dims.axis_labels = sliders
+
+    return napari_layers
+
+
+def show_napari2(viewer, array, metadata,
+                 blending='additive',
+                 gamma=0.85,
+                 add_mdtable=True,
+                 rename_sliders=False):
+    """Show the multidimensional array using the Napari viewer
+
+    :param viwer: Instnave of the napari viewer
+    :type array: NapariViewer
+    :param array: multidimensional NumPy.Array containing the pixeldata
+    :type array: NumPy.Array
+    :param metadata: dictionary with CZI or OME-TIFF metadata
+    :type metadata: dict
+    :param blending: NapariViewer option for blending, defaults to 'additive'
+    :type blending: str, optional
+    :param gamma: NapariViewer value for Gamma, defaults to 0.85
+    :type gamma: float, optional
+    :param rename_sliders: name slider with correct labels output, defaults to False
+    :type verbose: bool, optional
+    """
+
+    # create list for the napari layers
+    napari_layers = []
+
+    # create scalefcator with all ones
+    scalefactors = [1.0] * len(array.shape)
+
+    # use the dimension string from AICSImageIO 6D
+    dimpos = get_dimpositions(metadata['Axes_aics'])
+
+    # get the scalefactors from the metadata
+    scalef = get_scalefactor(metadata)
+
+    # modify the tuple for the scales for napari
+    scalefactors[dimpos['Z']] = scalef['zx']
+
+    # remove C dimension from scalefactor
+    scalefactors_ch = scalefactors.copy()
+    del scalefactors_ch[dimpos['C']]
+
+    # add widget for metadata
+    if add_mdtable:
+
+        # create widget for the metadata
+        mdbrowser = TableWidget()
+
+        viewer.window.add_dock_widget(mdbrowser,
+                                      name='mdbrowser',
+                                      area='right')
+
+        # add the metadata and adapt the table display
+        mdbrowser.update_metadata(metadata)
+        mdbrowser.update_style()
+
+    if metadata['SizeC'] > 1:
+
+        # add all channels as layers
+        for ch in range(metadata['SizeC']):
+
+            try:
+                # get the channel name
+                chname = metadata['Channels'][ch]
+            except KeyError as e:
+                print(e)
+                # or use CH1 etc. as string for the name
+                chname = 'CH' + str(ch + 1)
+
+            # cut out channel
+            # use dask if array is a dask.array
+            if isinstance(array, da.Array):
+                print('Extract Channel as Dask.Array')
+                channel = array.compute().take(ch, axis=dimpos['C'])
+
+            else:
+                # use normal numpy if not
+                print('Extract Channel as NumPy.Array')
+                channel = array.take(ch, axis=dimpos['C'])
+
+            # actually show the image array
+            print('Adding Channel  :', chname)
+            print('Shape Channel   :', ch, channel.shape)
+            print('Scaling Factors :', scalefactors_ch)
+
+            # get min-max values for initial scaling
+            clim = calc_scaling(channel,
+                                corr_min=1.0,
+                                offset_min=0,
+                                corr_max=0.85,
+                                offset_max=0)
+
+            # add channel to napari viewer
+            new_layer = viewer.add_image(channel,
+                                         name=chname,
+                                         scale=scalefactors_ch,
+                                         contrast_limits=clim,
+                                         blending=blending,
+                                         gamma=gamma)
+
+            napari_layers.append(new_layer)
+
+    if metadata['SizeC'] == 1:
+
+        # just add one channel as a layer
+        try:
+            # get the channel name
+            chname = metadata['Channels'][0]
+        except KeyError:
+            # or use CH1 etc. as string for the name
+            chname = 'CH' + str(ch + 1)
+
+        # actually show the image array
+        print('Adding Channel:', chname)
+        print('Scaling Factors:', scalefactors)
+
+        # use dask if array is a dask.array
+        if isinstance(array, da.Array):
+            print('Extract Channel using Dask.Array')
+            array = array.compute()
+
+        # get min-max values for initial scaling
+        clim = calc_scaling(array)
+
+        # add layer to Napari viewer
+        new_layer = viewer.add_image(array,
+                                     name=chname,
+                                     scale=scalefactors,
+                                     contrast_limits=clim,
+                                     blending=blending,
+                                     gamma=gamma)
+
+        napari_layers.append(new_layer)
+
+    if rename_sliders:
+
+        print('Renaming the Sliders based on the Dimension String ....')
+
+        if metadata['SizeC'] == 1:
+
+            # get the position of dimension entries after removing C dimension
+            dimpos_viewer = get_dimpositions(metadata['Axes_aics'])
+
+            # get the label of the sliders
+            sliders = viewer.dims.axis_labels
+
+            # update the labels with the correct dimension strings
+            slidernames = ['B', 'S', 'T', 'Z', 'C']
+
+        if metadata['SizeC'] > 1:
+
+            new_dimstring = metadata['Axes_aics'].replace('C', '')
+
+            # get the position of dimension entries after removing C dimension
+            dimpos_viewer = get_dimpositions(new_dimstring)
 
             # get the label of the sliders
             # for napari <= 0.4.2 this returns a list
