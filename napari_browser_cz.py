@@ -530,8 +530,8 @@ def get_zenfolders(zen_subfolder='Experiment Setups'):
 if __name__ == "__main__":
 
     # make sure this location is correct if you specify this
-    #savefolder = r'C:\Users\m1srh\Documents\Zen_Output'
-    savefolder = r'e:\tuxedo\zen_output'
+    savefolder = r'C:\Users\m1srh\Documents\Zen_Output'
+    #savefolder = r'e:\tuxedo\zen_output'
 
     if os.path.isdir(savefolder):
         print('SaveFolder : ', savefolder, 'found.')
@@ -556,7 +556,7 @@ if __name__ == "__main__":
         expfiles_short = []
 
     # default for saving an CZI image after acquisition
-    default_cziname = 'myimage.czi'
+    default_cziname = 'myimage2.czi'
 
     # decide what widget to use - 'tree' or 'dialog'
     fileselect = 'dialog'
