@@ -2,9 +2,9 @@
 
 #################################################################
 # File        : napari_browser_cz.py
-# Version     : 0.0.8
+# Version     : 0.1.0
 # Author      : czsrh
-# Date        : 31.01.2021
+# Date        : 02.02.2021
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Disclaimer: This tool is purely experimental. Feel free to
@@ -38,15 +38,16 @@ from PyQt5.QtWidgets import (
 
 )
 
-from PyQt5.QtCore import Qt, QDir, QSortFilterProxyModel
-from PyQt5.QtCore import pyqtSlot
+from PyQt5.QtCore import Qt, QDir
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtGui import QFont
 
 import napari
 import numpy as np
-import imgfile_tools as imf
+from aicspylibczi import CziFile
 #from czitools import imgfile_tools as imf
+import imgfile_tools as imf
+import czifile_tools as czt
 from aicsimageio import AICSImage
 import dask.array as da
 import os
@@ -57,7 +58,9 @@ from pathlib import Path
 class TableWidget(QWidget):
 
     def __init__(self):
+
         super(QWidget, self).__init__()
+
         self.layout = QVBoxLayout(self)
         self.mdtable = QTableWidget()
         self.layout.addWidget(self.mdtable)
@@ -109,28 +112,25 @@ class TableWidget(QWidget):
 
 class FileTree(QWidget):
 
-    def __init__(self, defaultfolder=r'c:\Zen_Output'):
+    def __init__(self, filter=['*.czi'], defaultfolder=r'c:\Zen_Output'):
         super(QWidget, self).__init__()
 
-        filter = ['*.czi', '*.ome.tiff', '*ome.tif' '*.tiff' '*.tif']
+        # define filter to allowed file extensions
+        #filter = ['*.czi', '*.ome.tiff', '*ome.tif' '*.tiff' '*.tif']
 
         # define the style for the FileTree via s style sheet
         self.setStyleSheet("""
-            QTreeView::item {
-            background-color: rgb(38, 41, 48);
-            font-weight: bold;
-            }
+            QTreeView: : item {
+            background - color: rgb(38, 41, 48);
+            font-weight: bold;}
 
-            QTreeView::item::selected {
-            background-color: rgb(38, 41, 48);
-            color: rgb(0, 255, 0);
+            QTreeView: : item: : selected {
+            background - color: rgb(38, 41, 48);
+            color: rgb(0, 255, 0); }
 
-            }
-
-            QTreeView QHeaderView:section {
-            background-color: rgb(38, 41, 48);
-            color: rgb(255, 255, 255);
-            }
+            QTreeView QHeaderView: section {
+            background - color: rgb(38, 41, 48);
+            color: rgb(255, 255, 255);}
             """)
 
         self.model = QFileSystemModel()
@@ -154,7 +154,6 @@ class FileTree(QWidget):
 
         self.tree.clicked.connect(self.on_treeView_clicked)
 
-    @pyqtSlot()
     def on_treeView_clicked(self, index):
         indexItem = self.model.index(index.row(), 0, index.parent())
         filename = self.model.fileName(indexItem)
@@ -199,6 +198,7 @@ class OptionsWidget(QWidget):
 class FileBrowser(QWidget):
 
     def __init__(self, defaultfolder=r'c:\Zen_Output'):
+
         super(QWidget, self).__init__()
         self.layout = QHBoxLayout(self)
         self.file_dialog = QFileDialog()
@@ -219,8 +219,14 @@ class FileBrowser(QWidget):
 
 class StartExperiment(QWidget):
 
-    def __init__(self, default_cziname='myimage.czi'):
+    def __init__(self, expfiles_short,
+                 savefolder=r'c:\temp',
+                 default_cziname='myimage.czi'):
+
         super(QWidget, self).__init__()
+
+        self.expfiles_short = expfiles_short
+        self.savefolder = savefolder
 
         # Create a grid layout instance
         self.grid_exp = QGridLayout()
@@ -229,7 +235,7 @@ class StartExperiment(QWidget):
 
         # add widgets to the grid layout
         self.expselect = QComboBox(self)
-        self.expselect.addItems(expfiles_short)
+        self.expselect.addItems(self.expfiles_short)
         self.expselect.setStyleSheet("font: bold;"
                                      "font-size: 10px;"
                                      )
@@ -262,7 +268,6 @@ class StartExperiment(QWidget):
         # Set the layout on the application's window
         self.startexpbutton.clicked.connect(self.on_click)
 
-    @pyqtSlot()
     def on_click(self):
 
         # get name of the selected experiment
@@ -273,7 +278,6 @@ class StartExperiment(QWidget):
         desired_cziname = self.nameedit.text()
 
         # disable the button while the experiment is running
-        self.startexpbutton.setEnabled(False)
         self.startexpbutton.setText('Running ...')
 
         # not nice, but this "redraws" the button
@@ -282,7 +286,7 @@ class StartExperiment(QWidget):
 
         # initialize the experiment with parameters
         czexp = ZenExperiment(experiment=current_exp,
-                              savefolder=savefolder,
+                              savefolder=self.savefolder,
                               cziname=desired_cziname)
 
         # start the actual experiment
@@ -297,21 +301,19 @@ class StartExperiment(QWidget):
         QtWidgets.QApplication.processEvents()
 
         # option to use Dask Delayed reader
-        use_dask = checkboxes.cbox_dask.isChecked()
-        print("Use Dask Reader : ", use_dask)
+        #use_dask = checkboxes.cbox_dask.isChecked()
+        #print("Use Dask Reader : ", use_dask)
 
         # open the just acquired CZI and show it inside napari viewer
         if self.saved_czifilepath is not None:
-            open_image_stack(self.saved_czifilepath, use_dask)
+            open_image_stack(self.saved_czifilepath)
 
 
-def open_image_stack(filepath, use_dask=False):
+def open_image_stack(filepath, force_dask=False):
     """ Open a file using AICSImageIO and display it using napari
 
     :param path: filepath of the image
     :type path: str
-    :param use_dask: use Dask Delayed reader, defaults to False
-    :type use_dask: bool, optional
     """
 
     if os.path.isfile(filepath):
@@ -323,180 +325,56 @@ def open_image_stack(filepath, use_dask=False):
         # get the metadata
         metadata, add_metadata = imf.get_metadata(filepath)
 
-        # add the metadata and adapt the table display
+        # add the global metadata and adapt the table display
         mdbrowser.update_metadata(metadata)
         mdbrowser.update_style()
 
-        # get AICSImageIO object
-        img = AICSImage(filepath)
+        use_aicsimageio = True
 
-        if not use_dask:
-            stack = img.get_image_data()
-        if use_dask:
-            stack = img.get_image_dask_data()
+        # decide whohc tool to use to read the image
+        if metadata['ImageType'] != 'czi':
+            use_aicsimageio = True
+        elif metadata['ImageType'] == 'czi' and metadata['czi_isMosaic'] is False:
+            use_aicsimageio = True
+        elif metadata['ImageType'] == 'czi' and metadata['czi_isMosaic'] is True:
+            use_aicsimageio = False
 
-        # add the image stack to the napari viewer
-        show_image_napari(stack, metadata,
-                          blending='additive',
-                          gamma=0.85,
-                          rename_sliders=True)
+        if use_aicsimageio:
+            # get AICSImageIO object
+            img = AICSImage(filepath)
 
-
-def show_image_napari(array, metadata,
-                      blending='additive',
-                      gamma=0.75,
-                      rename_sliders=False):
-    """Show the multidimensional array using the napari viewer
-
-    :param array: multidimensional NumPy.Array containing the pixeldata
-    :type array: NumPy.Array
-    :param metadata: dictionary with CZI or OME-TIFF metadata
-    :type metadata: dict
-    :param blending: napari viewer option for blending, defaults to 'additive'
-    :type blending: str, optional
-    :param gamma: napari viewer value for Gamma, defaults to 0.85
-    :type gamma: float, optional
-    :param rename_sliders: name slider with correct labels, defaults to False
-    :type verbose: bool, optional
-    """
-
-    # create scalefcator with all ones
-    scalefactors = [1.0] * len(array.shape)
-    dimpos = imf.get_dimpositions(metadata['Axes_aics'])
-
-    # get the scalefactors from the metadata
-    scalef = imf.get_scalefactor(metadata)
-
-    # modify the tuple for the scales for napari
-    scalefactors[dimpos['Z']] = scalef['zx']
-
-    # remove C dimension from scalefactor
-    scalefactors_ch = scalefactors.copy()
-    del scalefactors_ch[dimpos['C']]
-
-    if metadata['SizeC'] > 1:
-        # add all channels as layers
-        for ch in range(metadata['SizeC']):
-
-            try:
-                # get the channel name
-                chname = metadata['Channels'][ch]
-            except KeyError as e:
-                print(e)
-                # or use CH1 etc. as string for the name
-                chname = 'CH' + str(ch + 1)
-
-            # cut out channel
-            # use dask if array is a dask.array
-            if isinstance(array, da.Array):
-                print('Extract Channel as Dask.Array')
-                channel = array.compute().take(ch, axis=dimpos['C'])
-
-            else:
-                # use normal numpy if not
-                print('Extract Channel as NumPy.Array')
-                channel = array.take(ch, axis=dimpos['C'])
-
-            # actually show the image array
-            print('Adding Channel  : ', chname)
-            print('Shape Channel   : ', ch, channel.shape)
-            print('Scaling Factors : ', scalefactors_ch)
-
-            # get min-max values for initial scaling
-            clim = imf.calc_scaling(channel,
-                                    corr_min=1.0,
-                                    offset_min=0,
-                                    corr_max=0.85,
-                                    offset_max=0)
-
-            # add channel to napari viewer
-            viewer.add_image(channel,
-                             name=chname,
-                             scale=scalefactors_ch,
-                             contrast_limits=clim,
-                             blending=blending,
-                             gamma=gamma)
-
-    if metadata['SizeC'] == 1:
-
-        # just add one channel as a layer
-        try:
-            # get the channel name
-            chname = metadata['Channels'][0]
-        except KeyError:
-            # or use CH1 etc. as string for the name
-            chname = 'CH' + str(ch + 1)
-
-        # actually show the image array
-        print('Adding Channel: ', chname)
-        print('Scaling Factors: ', scalefactors)
-
-        # use dask if array is a dask.array
-        if isinstance(array, da.Array):
-            print('Extract Channel using Dask.Array')
-            array = array.compute()
-
-        # get min-max values for initial scaling
-        clim = imf.calc_scaling(array)
-
-        viewer.add_image(array,
-                         name=chname,
-                         scale=scalefactors,
-                         contrast_limits=clim,
-                         blending=blending,
-                         gamma=gamma)
-
-    if rename_sliders:
-
-        print('Renaming the Sliders based on the Dimension String ....')
-
-        if metadata['SizeC'] == 1:
-
-            # get the position of dimension entries after removing C dimension
-            dimpos_viewer = imf.get_dimpositions(metadata['Axes_aics'])
-
-            # get the label of the sliders
-            sliders = viewer.dims.axis_labels
-
-            # update the labels with the correct dimension strings
-            slidernames = ['B', 'S', 'T', 'Z', 'C']
-
-        if metadata['SizeC'] > 1:
-
-            new_dimstring = metadata['Axes_aics'].replace('C', '')
-
-            # get the position of dimension entries after removing C dimension
-            dimpos_viewer = imf.get_dimpositions(new_dimstring)
-
-            # get the label of the sliders
-            # for napari <= 0.4.2 this returns a list
-            # and >= 0.4.3 it will return a tuple
-            sliders = viewer.dims.axis_labels
-
-            # update the labels with the correct dimension strings
-            slidernames = ['B', 'S', 'T', 'Z']
-
-        for s in slidernames:
-            if dimpos_viewer[s] >= 0:
+            if not force_dask:
                 try:
-                    # this seems to work for napari <= 0.4.2
+                    # check if the Dask Delayed Reader should be used
+                    if not checkboxes.cbox_dask.isChecked():
+                        print('Using normal ImageReader.')
+                        stack = img.get_image_data()
+                    if checkboxes.cbox_dask.isChecked():
+                        print('Using Dask Delayed ImageReader')
+                        stack = img.get_image_dask_data()
+                except Exception as e:
+                    print(e, 'No Checkboxes found. Using normal ImageReader.')
+            if force_dask:
+                print('Using Dask Delayed ImageReader')
+                stack = img.get_image_dask_data()
 
-                    # assign the dimension labels
-                    sliders[dimpos_viewer[s]] = s
-                except TypeError:
-                    # this works for napari >= 0.4.3
+        if not use_aicsimageio:
+            cziobject = CziFile(filepath)
+            size = cziobject.read_mosaic_size()
+            dimsizes = imf.getdims_pylibczi(cziobject)
+            print('Mosaic Size: ', size)
 
-                    # convert to list()
-                    tmp_sliders = list(sliders)
+            # z = zarr.array(array, chunks=(metadata['SizeS'],
+            # metadata['SizeS'], metadata['SizeS'], metadata['SizeS'], 7964, 7164), dtype='uint16')
 
-                    # assign the dimension labels
-                    tmp_sliders[dimpos_viewer[s]] = s
+            stack = img6d = np.zeros(new_sizes, dtype=BF2NP_DTYPE[rdr.rdr.getPixelType()])
 
-                    # convert back to tuple
-                    sliders = tuple(tmp_sliders)
-
-        # apply the new labels to the viewer
-        viewer.dims.axis_labels = sliders
+        # show the actual image stack
+        imf.show_napari(viewer, stack, metadata,
+                        blending='additive',
+                        gamma=0.85,
+                        add_mdtable=False,
+                        rename_sliders=True)
 
 
 def get_zenfolders(zen_subfolder='Experiment Setups'):
@@ -530,68 +408,93 @@ def get_zenfolders(zen_subfolder='Experiment Setups'):
 if __name__ == "__main__":
 
     # make sure this location is correct if you specify this
-    savefolder = r'C:\Users\m1srh\Documents\Zen_Output'
-    #savefolder = r'e:\tuxedo\zen_output'
+    #workdir = r'C:\Users\m1srh\Documents\Zen_Output'
+    #workdir = r'C:\Users\m1srh\OneDrive - Carl Zeiss AG\Testdata_Zeiss'
+    workdir = r'c:\Temp\input'
+    #workdir = r'e:\tuxedo\zen_output'
 
-    if os.path.isdir(savefolder):
-        print('SaveFolder : ', savefolder, 'found.')
-    if not os.path.isdir(savefolder):
-        print('SaveFolder : ', savefolder, 'not found.')
+    if os.path.isdir(workdir):
+        print('SaveFolder : ', workdir, 'found.')
+    if not os.path.isdir(workdir):
+        print('SaveFolder : ', workdir, 'not found.')
 
     # specify directly or try to discover folder automatically
-    #zenexpfolder = r'c:\Users\testuser\Documents\Carl Zeiss\ZEN\Documents\Experiment Setups'
-    zenexpfolder = r'e:\Sebastian\Documents\Carl Zeiss\ZEN\Documents\Experiment Setups'
-    #zenexpfolder = get_zenfolders(zen_subfolder='Experiment Setups')
+    # zenexpfolder = r'c:\Users\testuser\Documents\Carl Zeiss\ZEN\Documents\Experiment Setups'
+    # zenexpfolder = r'e:\Sebastian\Documents\Carl Zeiss\ZEN\Documents\Experiment Setups'
+    zenexpfolder = get_zenfolders(zen_subfolder='Experiment Setups')
 
     # check if the ZEN experiment folder was found
-    if zenexpfolder is not None:
-        print('ZEN Experiment Setups Folder : ', zenexpfolder, 'found.')
+    expfiles_long = []
+    expfiles_short = []
+
+    if os.path.isdir(zenexpfolder):
+        print('ZEN Experiment Setups Folder :', zenexpfolder, 'found.')
         # get lists with existing experiment files
         expdocs = ZenDocuments()
         expfiles_long, expfiles_short = expdocs.getfilenames(folder=zenexpfolder,
                                                              pattern='*.czexp')
 
-    if zenexpfolder is None:
-        expfiles_long = []
-        expfiles_short = []
+    if not os.path.isdir(zenexpfolder):
+        print('ZEN Experiment Setups Folder :', zenexpfolder, 'not found.')
 
     # default for saving an CZI image after acquisition
-    default_cziname = 'myimage2.czi'
+    default_cziname = 'myimage.czi'
 
     # decide what widget to use - 'tree' or 'dialog'
+    # when using the FileTree one cannot navigate to higher levels
     fileselect = 'dialog'
+
+    # filter for file extensions
+    #filter = ['*.czi', '*.ome.tiff', '*ome.tif' '*.tiff' '*.tif']
+    filter = ['*.czi']
 
     # start the main application
     with napari.gui_qt():
 
         # define the parent directory
-        # when using the FileTree one cannot navigate to higher levels
-        print('Image Directory : ', savefolder)
+        print('Image Directory : ', workdir)
 
         # initialize the napari viewer
         print('Initializing Napari Viewer ...')
+
         viewer = napari.Viewer()
 
         if fileselect == 'tree':
             # add a FileTree widget
-            filetree = FileTree(defaultfolder=savefolder)
-            fbwidget = viewer.window.add_dock_widget(filetree, name='filebrowser', area='right')
+            filetree = FileTree(filter=filter, defaultfolder=workdir)
+            fbwidget = viewer.window.add_dock_widget(filetree,
+                                                     name='filebrowser',
+                                                     area='right')
 
         if fileselect == 'dialog':
-            # add a FileDialogg widget
-            filebrowser = FileBrowser(defaultfolder=savefolder)
-            fbwidget = viewer.window.add_dock_widget(filebrowser, name='filebrowser', area='right')
+            # add a FileDialog widget
+            filebrowser = FileBrowser(defaultfolder=workdir)
+            fbwidget = viewer.window.add_dock_widget(filebrowser,
+                                                     name='filebrowser',
+                                                     area='right')
 
-        # create the widget elements
+        # create the widget elements to be added to the napari viewer
+
+        # table for the metadata and for options
         mdbrowser = TableWidget()
         checkboxes = OptionsWidget()
-        expselect = StartExperiment(default_cziname=default_cziname)
+
+        # widget to start an experiment in ZEN remotely
+        expselect = StartExperiment(expfiles_short,
+                                    savefolder=workdir,
+                                    default_cziname=default_cziname)
 
         # add widget to activate the dask delayed reading
-        cbwidget = viewer.window.add_dock_widget(checkboxes, name='checkbox', area='bottom')
+        cbwidget = viewer.window.add_dock_widget(checkboxes,
+                                                 name='checkbox',
+                                                 area='bottom')
 
         # add the Table widget for the metadata
-        mdwidget = viewer.window.add_dock_widget(mdbrowser, name='mdbrowser', area='right')
+        mdwidget = viewer.window.add_dock_widget(mdbrowser,
+                                                 name='mdbrowser',
+                                                 area='right')
 
         # add the Experiment Selector widget
-        expwidget = viewer.window.add_dock_widget(expselect, name='expselect', area='bottom')
+        expwidget = viewer.window.add_dock_widget(expselect,
+                                                  name='expselect',
+                                                  area='bottom')

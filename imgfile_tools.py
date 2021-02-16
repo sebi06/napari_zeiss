@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
 
 #################################################################
-# File        : imgfileutils.py
-# Version     : 1.4.8
+# File        : imgfil_tools.py
+# Version     : 1.5.2
 # Author      : czsrh
-# Date        : 30.01.2021
+# Date        : 16.02.2021
 # Institution : Carl Zeiss Microscopy GmbH
 #
-# Copyright (c) 2020 Carl Zeiss AG, Germany. All Rights Reserved.
+# Disclaimer: This tool is purely experimental. Feel free to
+# use it at your own risk.
+#
+# Copyright (c) 2021 Carl Zeiss AG, Germany. All Rights Reserved.
 #################################################################
 
 
@@ -17,6 +20,7 @@ import os
 from pathlib import Path
 import xmltodict
 import numpy as np
+import czifile_tools as czt
 from collections import Counter
 from lxml import etree as ET
 import sys
@@ -27,16 +31,8 @@ import dask.array as da
 import pandas as pd
 import tifffile
 import pydash
+import zarr
 
-"""
-try:
-    import javabridge as jv
-    import bioformats
-except (ImportError, ModuleNotFoundError) as error:
-    # Output expected ImportErrors.
-    print(error.__class__.__name__ + ": " + error.msg)
-    print('Python-BioFormats cannot be used')
-"""
 try:
     import napari
 except ModuleNotFoundError as error:
@@ -127,8 +123,8 @@ def create_metadata_dict():
                 'Sizes BF': None,
                 'DimOrder BF': None,
                 'DimOrder BF Array': None,
-                'Axes_czifile': None,
-                'Shape_czifile': None,
+                'axes_czifile': None,
+                'shape_czifile': None,
                 'czi_isRGB': False,
                 'czi_isMosaic': False,
                 'ObjNA': [],
@@ -407,8 +403,8 @@ def get_metadata_czi(filename, dim2none=False,
     metadata['ImageType'] = 'czi'
 
     # add axes and shape information using czifile package
-    metadata['Axes_czifile'] = czi.axes
-    metadata['Shape_czifile'] = czi.shape
+    metadata['axes_czifile'] = czi.axes
+    metadata['shape_czifile'] = czi.shape
 
     # add axes and shape information using aicsimageio package
     czi_aics = AICSImage(filename)
@@ -435,10 +431,16 @@ def get_metadata_czi(filename, dim2none=False,
     # Get the shape of the data, the coordinate pairs are (start index, size)
     aics_czi = CziFile(filename)
     metadata['dims_aicspylibczi'] = aics_czi.dims_shape()[0]
-    metadata['dimorder_aicspylibczi'] = aics_czi.dims
+    metadata['axes_aicspylibczi'] = aics_czi.dims
     metadata['size_aicspylibczi'] = aics_czi.size
     metadata['czi_isMosaic'] = aics_czi.is_mosaic()
     print('CZI is Mosaic :', metadata['czi_isMosaic'])
+
+    # get positions of dimensions
+    try:
+        metadata['dimpos_aics'] = get_dimpositions(metadata['Axes_aics'])
+    except KeyError:
+        metadata['dimpos_aics'] = None
 
     # determine pixel type for CZI array
     metadata['NumPy.dtype'] = czi.dtype
@@ -664,6 +666,15 @@ def get_metadata_czi(filename, dim2none=False,
             # set to isotropic scaling if it was single plane only
             metadata['ZScale'] = metadata['XScale']
             metadata['ZScaleUnit'] = metadata['XScaleUnit']
+
+    # convert scale unit to avoid encoding problems
+    if convert_scunit:
+        if metadata['XScaleUnit'] == 'µm':
+            metadata['XScaleUnit'] = 'micron'
+        if metadata['YScaleUnit'] == 'µm':
+            metadata['YScaleUnit'] = 'micron'
+        if metadata['ZScaleUnit'] == 'µm':
+            metadata['ZScaleUnit'] = 'micron'
 
     # try to get software version
     try:
@@ -1010,20 +1021,17 @@ def get_metadata_czi(filename, dim2none=False,
     except (KeyError, TypeError) as e:
         print('No valid Scene or Well information found:', e)
 
+    # get the dimensions of the bounding boxes for the scenes
+    # acces CZI image using aicslibczi
+    cziobject = CziFile(filename)
+    metadata['BBoxes_Scenes'] = czt.getbboxes_allscenes(cziobject, metadata,
+                                                        numscenes=metadata['SizeS'])
+
     # close CZI file
     czi.close()
 
     # close AICSImage object
     czi_aics.close()
-
-    # convert scale unit tom avoid encoding problems
-    if convert_scunit:
-        if metadata['XScaleUnit'] == 'µm':
-            metadata['XScaleUnit'] = 'micron'
-        if metadata['YScaleUnit'] == 'µm':
-            metadata['YScaleUnit'] = 'micron'
-        if metadata['ZScaleUnit'] == 'µm':
-            metadata['ZScaleUnit'] = 'micron'
 
     return metadata
 
@@ -1263,9 +1271,21 @@ def calc_scaling(data, corr_min=1.0,
     :rtype: list
     """
 
-    # get min-max values for initial scaling
-    minvalue = np.round((data.min() + offset_min) * corr_min)
-    maxvalue = np.round((data.max() + offset_max) * corr_max)
+    if isinstance(data, zarr.Array):
+        minvalue = np.min(data)
+        maxvalue = np.max(data)
+
+    elif isinstance(data, da.Array):
+        minvalue = data.compute().min()
+        maxvalue = data.compute().max()
+
+    else:  # get min-max values for initial scaling
+        minvalue = data.min()
+        maxvalue = data.max()
+
+    minvalue = np.round((minvalue + offset_min) * corr_min)
+    maxvalue = np.round((maxvalue + offset_max) * corr_max)
+
     print('Scaling:', minvalue, maxvalue)
 
     return [minvalue, maxvalue]
@@ -1276,199 +1296,6 @@ def show_napari(viewer, array, metadata,
                 gamma=0.85,
                 add_mdtable=True,
                 rename_sliders=False):
-    """Show the multidimensional array using the Napari viewer
-
-    :param viwer: Instnave of the napari viewer
-    :type array: NapariViewer
-    :param array: multidimensional NumPy.Array containing the pixeldata
-    :type array: NumPy.Array
-    :param metadata: dictionary with CZI or OME-TIFF metadata
-    :type metadata: dict
-    :param blending: NapariViewer option for blending, defaults to 'additive'
-    :type blending: str, optional
-    :param gamma: NapariViewer value for Gamma, defaults to 0.85
-    :type gamma: float, optional
-    :param rename_sliders: name slider with correct labels output, defaults to False
-    :type verbose: bool, optional
-    """
-
-    # create list for the napari layers
-    napari_layers = []
-
-    with napari.gui_qt():
-
-        # create scalefcator with all ones
-        scalefactors = [1.0] * len(array.shape)
-
-        # use the dimension string from AICSImageIO 6D
-        dimpos = get_dimpositions(metadata['Axes_aics'])
-
-        # get the scalefactors from the metadata
-        scalef = get_scalefactor(metadata)
-
-        # modify the tuple for the scales for napari
-        scalefactors[dimpos['Z']] = scalef['zx']
-
-        # remove C dimension from scalefactor
-        scalefactors_ch = scalefactors.copy()
-        del scalefactors_ch[dimpos['C']]
-
-        # initialize the napari viewer
-        print('Initializing Napari Viewer ...')
-        viewer = napari.Viewer()
-
-        # add widget for metadata
-        if add_mdtable:
-
-            # create widget for the metadata
-            mdbrowser = TableWidget()
-
-            viewer.window.add_dock_widget(mdbrowser,
-                                          name='mdbrowser',
-                                          area='right')
-
-            # add the metadata and adapt the table display
-            mdbrowser.update_metadata(metadata)
-            mdbrowser.update_style()
-
-        if metadata['SizeC'] > 1:
-
-            # add all channels as layers
-            for ch in range(metadata['SizeC']):
-
-                try:
-                    # get the channel name
-                    chname = metadata['Channels'][ch]
-                except KeyError as e:
-                    print(e)
-                    # or use CH1 etc. as string for the name
-                    chname = 'CH' + str(ch + 1)
-
-                # cut out channel
-                # use dask if array is a dask.array
-                if isinstance(array, da.Array):
-                    print('Extract Channel as Dask.Array')
-                    channel = array.compute().take(ch, axis=dimpos['C'])
-
-                else:
-                    # use normal numpy if not
-                    print('Extract Channel as NumPy.Array')
-                    channel = array.take(ch, axis=dimpos['C'])
-
-                # actually show the image array
-                print('Adding Channel  :', chname)
-                print('Shape Channel   :', ch, channel.shape)
-                print('Scaling Factors :', scalefactors_ch)
-
-                # get min-max values for initial scaling
-                clim = calc_scaling(channel,
-                                    corr_min=1.0,
-                                    offset_min=0,
-                                    corr_max=0.85,
-                                    offset_max=0)
-
-                # add channel to napari viewer
-                new_layer = viewer.add_image(channel,
-                                             name=chname,
-                                             scale=scalefactors_ch,
-                                             contrast_limits=clim,
-                                             blending=blending,
-                                             gamma=gamma)
-
-                napari_layers.append(new_layer)
-
-        if metadata['SizeC'] == 1:
-
-            # just add one channel as a layer
-            try:
-                # get the channel name
-                chname = metadata['Channels'][0]
-            except KeyError:
-                # or use CH1 etc. as string for the name
-                chname = 'CH' + str(ch + 1)
-
-            # actually show the image array
-            print('Adding Channel:', chname)
-            print('Scaling Factors:', scalefactors)
-
-            # use dask if array is a dask.array
-            if isinstance(array, da.Array):
-                print('Extract Channel using Dask.Array')
-                array = array.compute()
-
-            # get min-max values for initial scaling
-            clim = calc_scaling(array)
-
-            # add layer to Napari viewer
-            new_layer = viewer.add_image(array,
-                                         name=chname,
-                                         scale=scalefactors,
-                                         contrast_limits=clim,
-                                         blending=blending,
-                                         gamma=gamma)
-
-            napari_layers.append(new_layer)
-
-    if rename_sliders:
-
-        print('Renaming the Sliders based on the Dimension String ....')
-
-        if metadata['SizeC'] == 1:
-
-            # get the position of dimension entries after removing C dimension
-            dimpos_viewer = get_dimpositions(metadata['Axes_aics'])
-
-            # get the label of the sliders
-            sliders = viewer.dims.axis_labels
-
-            # update the labels with the correct dimension strings
-            slidernames = ['B', 'S', 'T', 'Z', 'C']
-
-        if metadata['SizeC'] > 1:
-
-            new_dimstring = metadata['Axes_aics'].replace('C', '')
-
-            # get the position of dimension entries after removing C dimension
-            dimpos_viewer = get_dimpositions(new_dimstring)
-
-            # get the label of the sliders
-            # for napari <= 0.4.2 this returns a list
-            # and >= 0.4.3 it will return a tuple
-            sliders = viewer.dims.axis_labels
-
-            # update the labels with the correct dimension strings
-            slidernames = ['B', 'S', 'T', 'Z']
-
-        for s in slidernames:
-            if dimpos_viewer[s] >= 0:
-                try:
-                    # this seems to work for napari <= 0.4.2
-
-                    # assign the dimension labels
-                    sliders[dimpos_viewer[s]] = s
-                except TypeError:
-                    # this works for napari >= 0.4.3
-
-                    # convert to list()
-                    tmp_sliders = list(sliders)
-
-                    # assign the dimension labels
-                    tmp_sliders[dimpos_viewer[s]] = s
-
-                    # convert back to tuple
-                    sliders = tuple(tmp_sliders)
-
-        # apply the new labels to the viewer
-        viewer.dims.axis_labels = sliders
-
-    return napari_layers
-
-
-def show_napari2(viewer, array, metadata,
-                 blending='additive',
-                 gamma=0.85,
-                 add_mdtable=True,
-                 rename_sliders=False):
     """Show the multidimensional array using the Napari viewer
 
     :param viwer: Instnave of the napari viewer
@@ -1532,15 +1359,21 @@ def show_napari2(viewer, array, metadata,
                 chname = 'CH' + str(ch + 1)
 
             # cut out channel
+            channel = slicedimC(array, ch, dimpos['C'])
             # use dask if array is a dask.array
+            """
             if isinstance(array, da.Array):
                 print('Extract Channel as Dask.Array')
-                channel = array.compute().take(ch, axis=dimpos['C'])
-
-            else:
+                channel = slicedimC(array, ch, dimpos['C'])
+                # channel = array.compute().take(ch, axis=dimpos['C'])
+            if isinstance(array, zarr.Array):
+                print('Extract Channel as Dask.Array')
+                channel = slicedimC(array, ch, dimpos['C'])
+            if isinstance(array, np.ndarray):
                 # use normal numpy if not
                 print('Extract Channel as NumPy.Array')
                 channel = array.take(ch, axis=dimpos['C'])
+            """
 
             # actually show the image array
             print('Adding Channel  :', chname)
@@ -1584,7 +1417,11 @@ def show_napari2(viewer, array, metadata,
             array = array.compute()
 
         # get min-max values for initial scaling
-        clim = calc_scaling(array)
+        clim = calc_scaling(array,
+                            corr_min=1.0,
+                            offset_min=0,
+                            corr_max=0.85,
+                            offset_max=0)
 
         # add layer to Napari viewer
         new_layer = viewer.add_image(array,
@@ -2275,3 +2112,35 @@ class TableWidget(QWidget):
         item2.setForeground(QtGui.QColor(25, 25, 25))
         item2.setFont(fnt)
         self.mdtable.setHorizontalHeaderItem(1, item2)
+
+
+# function to return key for any value
+def get_key(my_dict, val):
+    """Get the key based on a value
+
+    :param my_dict: dictionary with key - value pair
+    :type my_dict: [dict
+    :param val: value used to find the key
+    :type val: any
+    :return: key
+    :rtype: any
+    """
+    for key, value in my_dict.items():
+        if val == value:
+            return key
+
+    return None
+
+
+def slicedimC(array, dimindex, posdim):
+
+    if posdim == 0:
+        array_sliced = array[dimindex:dimindex + 1, :, :, :, :, :]
+    if posdim == 1:
+        array_sliced = array[:, dimindex:dimindex + 1, :, :, :, :]
+    if posdim == 2:
+        array_sliced = array[:, :, dimindex:dimindex + 1, :, :, :]
+    if posdim == 3:
+        array_sliced = array[:, :, :, dimindex:dimindex + 1, :, :]
+
+    return array_sliced
