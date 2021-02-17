@@ -2,9 +2,9 @@
 
 #################################################################
 # File        : imgfil_tools.py
-# Version     : 1.5.2
+# Version     : 1.6.0
 # Author      : czsrh
-# Date        : 16.02.2021
+# Date        : 17.02.2021
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Disclaimer: This tool is purely experimental. Feel free to
@@ -1345,89 +1345,29 @@ def show_napari(viewer, array, metadata,
         mdbrowser.update_metadata(metadata)
         mdbrowser.update_style()
 
-    if metadata['SizeC'] > 1:
+    # add all channels as layers
+    for ch in range(metadata['SizeC']):
 
-        # add all channels as layers
-        for ch in range(metadata['SizeC']):
-
-            try:
-                # get the channel name
-                chname = metadata['Channels'][ch]
-            except KeyError as e:
-                print(e)
-                # or use CH1 etc. as string for the name
-                chname = 'CH' + str(ch + 1)
-
-            # cut out channel
-            channel = slicedimC(array, ch, dimpos['C'])
-            # use dask if array is a dask.array
-            """
-            if isinstance(array, da.Array):
-                print('Extract Channel as Dask.Array')
-                channel = slicedimC(array, ch, dimpos['C'])
-                # channel = array.compute().take(ch, axis=dimpos['C'])
-            if isinstance(array, zarr.Array):
-                print('Extract Channel as Dask.Array')
-                channel = slicedimC(array, ch, dimpos['C'])
-            if isinstance(array, np.ndarray):
-                # use normal numpy if not
-                print('Extract Channel as NumPy.Array')
-                channel = array.take(ch, axis=dimpos['C'])
-            """
-
-            # actually show the image array
-            print('Adding Channel  :', chname)
-            print('Shape Channel   :', ch, channel.shape)
-            print('Scaling Factors :', scalefactors_ch)
-
-            # get min-max values for initial scaling
-            clim = calc_scaling(channel,
-                                corr_min=1.0,
-                                offset_min=0,
-                                corr_max=0.85,
-                                offset_max=0)
-
-            # add channel to napari viewer
-            new_layer = viewer.add_image(channel,
-                                         name=chname,
-                                         scale=scalefactors_ch,
-                                         contrast_limits=clim,
-                                         blending=blending,
-                                         gamma=gamma)
-
-            napari_layers.append(new_layer)
-
-    if metadata['SizeC'] == 1:
-
-        # just add one channel as a layer
         try:
             # get the channel name
-            chname = metadata['Channels'][0]
-        except KeyError:
+            chname = metadata['Channels'][ch]
+        except KeyError as e:
+            print(e)
             # or use CH1 etc. as string for the name
             chname = 'CH' + str(ch + 1)
 
+        # cut out channel
+        channel = slicedim(array, ch, dimpos['C'])
+
         # actually show the image array
-        print('Adding Channel:', chname)
-        print('Scaling Factors:', scalefactors)
+        print('Adding Channel  :', chname)
+        print('Shape Channel   :', ch, channel.shape)
+        print('Scaling Factors :', scalefactors_ch)
 
-        # use dask if array is a dask.array
-        if isinstance(array, da.Array):
-            print('Extract Channel using Dask.Array')
-            array = array.compute()
-
-        # get min-max values for initial scaling
-        clim = calc_scaling(array,
-                            corr_min=1.0,
-                            offset_min=0,
-                            corr_max=0.85,
-                            offset_max=0)
-
-        # add layer to Napari viewer
-        new_layer = viewer.add_image(array,
+        # add channel to napari viewer
+        new_layer = viewer.add_image(channel,
                                      name=chname,
-                                     scale=scalefactors,
-                                     contrast_limits=clim,
+                                     scale=scalefactors_ch,
                                      blending=blending,
                                      gamma=gamma)
 
@@ -1437,53 +1377,8 @@ def show_napari(viewer, array, metadata,
 
         print('Renaming the Sliders based on the Dimension String ....')
 
-        if metadata['SizeC'] == 1:
-
-            # get the position of dimension entries after removing C dimension
-            dimpos_viewer = get_dimpositions(metadata['Axes_aics'])
-
-            # get the label of the sliders
-            sliders = viewer.dims.axis_labels
-
-            # update the labels with the correct dimension strings
-            slidernames = ['B', 'S', 'T', 'Z', 'C']
-
-        if metadata['SizeC'] > 1:
-
-            new_dimstring = metadata['Axes_aics'].replace('C', '')
-
-            # get the position of dimension entries after removing C dimension
-            dimpos_viewer = get_dimpositions(new_dimstring)
-
-            # get the label of the sliders
-            # for napari <= 0.4.2 this returns a list
-            # and >= 0.4.3 it will return a tuple
-            sliders = viewer.dims.axis_labels
-
-            # update the labels with the correct dimension strings
-            slidernames = ['B', 'S', 'T', 'Z']
-
-        for s in slidernames:
-            if dimpos_viewer[s] >= 0:
-                try:
-                    # this seems to work for napari <= 0.4.2
-
-                    # assign the dimension labels
-                    sliders[dimpos_viewer[s]] = s
-                except TypeError:
-                    # this works for napari >= 0.4.3
-
-                    # convert to list()
-                    tmp_sliders = list(sliders)
-
-                    # assign the dimension labels
-                    tmp_sliders[dimpos_viewer[s]] = s
-
-                    # convert back to tuple
-                    sliders = tuple(tmp_sliders)
-
-        # apply the new labels to the viewer
-        viewer.dims.axis_labels = sliders
+        # get the label of the sliders (as a tuple) ad rename it
+        viewer.dims.axis_labels = napari_rename_sliders(viewer.dims.axis_labels, metadata['Axes_aics'])
 
     return napari_layers
 
@@ -2132,15 +2027,80 @@ def get_key(my_dict, val):
     return None
 
 
-def slicedimC(array, dimindex, posdim):
+def slicedim(array, dimindex, posdim):
+    """slice out a specific channel without (!) dropping the dimsion
+    # of the array to conserve the dimorder string
+    # this should work for Numpy.Array, Dask and ZARR ...
+
+    :param array: The array to be sliced
+    :type array: Numpy.Array, dask.Array, zarr.Array
+    :param dimindex: index to be sliced out at a given dimension
+    :type dimindex: int
+    :param posdim: index of the dimension where the slicing should take place
+    :type posdim: int
+    :return: sliced array
+    :rtype: Numpy.Array, dask.array, zarr.array
+    """
 
     if posdim == 0:
-        array_sliced = array[dimindex:dimindex + 1, :, :, :, :, :]
+        array_sliced = array[dimindex:dimindex + 1, ...]
     if posdim == 1:
-        array_sliced = array[:, dimindex:dimindex + 1, :, :, :, :]
+        array_sliced = array[:, dimindex:dimindex + 1, ...]
     if posdim == 2:
-        array_sliced = array[:, :, dimindex:dimindex + 1, :, :, :]
+        array_sliced = array[:, :, dimindex:dimindex + 1, ...]
     if posdim == 3:
-        array_sliced = array[:, :, :, dimindex:dimindex + 1, :, :]
+        array_sliced = array[:, :, :, dimindex:dimindex + 1, ...]
+    if posdim == 4:
+        array_sliced = array[:, :, :, :, dimindex:dimindex + 1, ...]
+    if posdim == 5:
+        array_sliced = array[:, :, :, :, :, dimindex:dimindex + 1, ...]
+
+    """
+    # old way to it differently
+    
+    if isinstance(array, da.Array):
+        print('Extract Channel as Dask.Array')
+        channel = slicedimC(array, ch, dimpos['C'])
+        # channel = array.compute().take(ch, axis=dimpos['C'])
+    if isinstance(array, zarr.Array):
+        print('Extract Channel as Dask.Array')
+        channel = slicedimC(array, ch, dimpos['C'])
+    if isinstance(array, np.ndarray):
+        # use normal numpy if not
+        print('Extract Channel as NumPy.Array')
+        channel = array.take(ch, axis=dimpos['C'])
+    """
 
     return array_sliced
+
+
+def napari_rename_sliders(sliders, axes_aics):
+    """Rename the sliders of the Napari viewer accoring to the dimensions.
+
+    :param sliders: Tupe containing the slider label
+    :type sliders: tuple
+    :param axes_aics: Dimension string using AICSImageIO
+    :type axes_aics: str
+    :return: Tuple with new slider labels
+    :rtype: tuple
+    """
+
+    # get the positions of dimension entries after removing C dimension
+    dimpos_viewer = get_dimpositions(axes_aics)
+
+    # update the labels with the correct dimension strings
+    slidernames = ['B', 'H', 'V', 'M', 'S', 'T', 'Z']
+
+    # convert to list()
+    tmp_sliders = list(sliders)
+
+    for s in slidernames:
+        if dimpos_viewer[s] >= 0:
+
+            # assign the dimension labels
+            tmp_sliders[dimpos_viewer[s]] = s
+
+            # convert back to tuple
+            sliders = tuple(tmp_sliders)
+
+    return sliders
