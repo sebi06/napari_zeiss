@@ -2,9 +2,9 @@
 
 #################################################################
 # File        : czifile_tools.py
-# Version     : 0.0.9
+# Version     : 0.1.0
 # Author      : czsrh
-# Date        : 16.02.2021
+# Date        : 17.02.2021
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Copyright (c) 2021 Carl Zeiss AG, Germany. All Rights Reserved.
@@ -309,23 +309,23 @@ def read_scene_bbox(cziobject, metadata,
                     scalefactor=1.0):
     """Read a specific scene from a CZI image file.
 
-: param cziobject: The CziFile reader object from aicspylibczi
-: type cziobject: CziFile
-: param metadata: Image metadata dictionary from imgfileutils
-: type metadata: dict
-: param sceneindex: Index of scene, defaults to 0
-: type sceneindex: int, optional
-: param channel: Index of channel, defaults to 0
-: type channel: int, optional
-: param timepoint: Index of Timepoint, defaults to 0
-: type timepoint: int, optional
-: param zplane: Index of z - plane, defaults to 0
-: type zplane: int, optional
-: param scalefactor: scaling factor to read CZI image pyramid, defaults to 1.0
-: type scalefactor: float, optional
-: return: scene as a numpy array
-: rtype: NumPy.Array
-"""
+    : param cziobject: The CziFile reader object from aicspylibczi
+    : type cziobject: CziFile
+    : param metadata: Image metadata dictionary from imgfileutils
+    : type metadata: dict
+    : param sceneindex: Index of scene, defaults to 0
+    : type sceneindex: int, optional
+    : param channel: Index of channel, defaults to 0
+    : type channel: int, optional
+    : param timepoint: Index of Timepoint, defaults to 0
+    : type timepoint: int, optional
+    : param zplane: Index of z - plane, defaults to 0
+    : type zplane: int, optional
+    : param scalefactor: scaling factor to read CZI image pyramid, defaults to 1.0
+    : type scalefactor: float, optional
+    : return: scene as a numpy array
+    : rtype: NumPy.Array
+    """
     # set variables
     scene = None
     hasT = False

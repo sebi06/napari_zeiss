@@ -2,7 +2,7 @@
 
 #################################################################
 # File        : imgfil_tools.py
-# Version     : 1.6.0
+# Version     : 1.6.1
 # Author      : czsrh
 # Date        : 17.02.2021
 # Institution : Carl Zeiss Microscopy GmbH
@@ -2095,12 +2095,15 @@ def napari_rename_sliders(sliders, axes_aics):
     tmp_sliders = list(sliders)
 
     for s in slidernames:
-        if dimpos_viewer[s] >= 0:
+        try:
+            if dimpos_viewer[s] >= 0:
 
-            # assign the dimension labels
-            tmp_sliders[dimpos_viewer[s]] = s
+                # assign the dimension labels
+                tmp_sliders[dimpos_viewer[s]] = s
 
-            # convert back to tuple
-            sliders = tuple(tmp_sliders)
+                # convert back to tuple
+                sliders = tuple(tmp_sliders)
+        except KeyError:
+            print('No', s, 'Dimension found')
 
     return sliders

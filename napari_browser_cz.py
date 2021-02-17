@@ -2,9 +2,9 @@
 
 #################################################################
 # File        : napari_browser_cz.py
-# Version     : 0.1.0
+# Version     : 0.2.0
 # Author      : czsrh
-# Date        : 02.02.2021
+# Date        : 17.02.2021
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Disclaimer: This tool is purely experimental. Feel free to
@@ -42,6 +42,7 @@ from PyQt5.QtCore import Qt, QDir
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtGui import QFont
 
+import sys
 import napari
 import numpy as np
 from aicspylibczi import CziFile
@@ -49,7 +50,9 @@ from aicspylibczi import CziFile
 import imgfile_tools as imf
 import czifile_tools as czt
 from aicsimageio import AICSImage
+import dask
 import dask.array as da
+import zarr
 import os
 from zencontrol import ZenExperiment, ZenDocuments
 from pathlib import Path
@@ -330,14 +333,36 @@ def open_image_stack(filepath, force_dask=False):
         mdbrowser.update_style()
 
         use_aicsimageio = True
+        use_pylibczi = False
 
-        # decide whohc tool to use to read the image
+        # decide which tool to use to read the image
         if metadata['ImageType'] != 'czi':
             use_aicsimageio = True
         elif metadata['ImageType'] == 'czi' and metadata['czi_isMosaic'] is False:
             use_aicsimageio = True
         elif metadata['ImageType'] == 'czi' and metadata['czi_isMosaic'] is True:
             use_aicsimageio = False
+
+        # check if CZI has T or Z dimension
+        hasT = False
+        hasZ = False
+        if 'T' in metadata['dims_aicspylibczi']:
+            hasT = True
+        if 'Z' in metadata['dims_aicspylibczi']:
+            hasZ = True
+
+        # read CZI using aicspylibczi
+        czi = CziFile(filepath)
+
+        # get the required shape for all and single scenes
+        shape_all, shape_single, same_shape = czt.get_shape_allscenes(czi, metadata)
+        print('Required_Array Shape for all scenes: ', shape_all)
+        for sh in shape_single:
+            print('Required Array Shape for single scenes: ', sh)
+
+        if not same_shape:
+            print('No all scenes have the same shape. Exiting ...')
+            sys.exit()
 
         if use_aicsimageio:
             # get AICSImageIO object
@@ -347,30 +372,73 @@ def open_image_stack(filepath, force_dask=False):
                 try:
                     # check if the Dask Delayed Reader should be used
                     if not checkboxes.cbox_dask.isChecked():
-                        print('Using normal ImageReader.')
-                        stack = img.get_image_data()
+                        print('Using AICSImageIO normal ImageReader.')
+                        all_scenes_array = img.get_image_data()
                     if checkboxes.cbox_dask.isChecked():
-                        print('Using Dask Delayed ImageReader')
-                        stack = img.get_image_dask_data()
+                        print('Using AICSImageIO Dask Delayed ImageReader')
+                        all_scenes_array = img.get_image_dask_data()
                 except Exception as e:
                     print(e, 'No Checkboxes found. Using normal ImageReader.')
             if force_dask:
                 print('Using Dask Delayed ImageReader')
-                stack = img.get_image_dask_data()
+                all_scenes_array = img.get_image_dask_data()
 
-        if not use_aicsimageio:
-            cziobject = CziFile(filepath)
-            size = cziobject.read_mosaic_size()
-            dimsizes = imf.getdims_pylibczi(cziobject)
-            print('Mosaic Size: ', size)
+        if not use_aicsimageio and use_pylibczi is True:
 
-            # z = zarr.array(array, chunks=(metadata['SizeS'],
-            # metadata['SizeS'], metadata['SizeS'], metadata['SizeS'], 7964, 7164), dtype='uint16')
+            #array_type = 'dask'
+            array_type = 'zarr'
+            #array_type = 'numpy'
 
-            stack = img6d = np.zeros(new_sizes, dtype=BF2NP_DTYPE[rdr.rdr.getPixelType()])
+            if array_type == 'zarr':
+
+                # define array to store all channels
+                print('Using aicspylibCZI to read the image (ZARR array).')
+                all_scenes_array = zarr.create(tuple(shape_all),
+                                               dtype=metadata['NumPy.dtype'],
+                                               chunks=True)
+
+            if array_type == 'numpy':
+                print('Using aicspylibCZI to read the image (Numpy.Array).')
+                all_scenes_array = np.empty(shape_all, dtype=metadata['NumPy.dtype'])
+
+            if array_type == 'zarr' or array_type == 'numpy':
+
+                # loop over all scenes
+                for s in range(metadata['SizeS']):
+                    # get the CZIscene for the current scene
+                    single_scene = czt.CZIScene(czi, metadata, sceneindex=s)
+                    out = czt.read_czi_scene(czi, single_scene, metadata)
+                    all_scenes_array[s, :, :, :, :, :] = np.squeeze(out, axis=0)
+
+                print(all_scenes_array.shape)
+
+            elif array_type == 'dask':
+
+                def dask_load_sceneimage(czi, s, md):
+
+                    # get the CZIscene for the current scene
+                    single_scene = czt.CZIScene(czi, md, sceneindex=s)
+                    out = czt.read_czi_scene(czi, single_scene, md)
+                    return out
+
+                sp = shape_all[1:]
+
+                # create dask stack of lazy image readers
+                print('Using aicspylibCZI to read the image (Dask.Array) + Delayed Reading.')
+                lazy_process_image = dask.delayed(dask_load_sceneimage)  # lazy reader
+
+                lazy_arrays = [lazy_process_image(czi, s, metadata) for s in range(metadata['SizeS'])]
+
+                dask_arrays = [
+                    da.from_delayed(lazy_array, shape=sp, dtype=metadata['NumPy.dtype'])
+                    for lazy_array in lazy_arrays
+                ]
+                # Stack into one large dask.array
+                all_scenes_array = da.stack(dask_arrays, axis=0)
+                print(all_scenes_array.shape)
 
         # show the actual image stack
-        imf.show_napari(viewer, stack, metadata,
+        imf.show_napari(viewer, all_scenes_array, metadata,
                         blending='additive',
                         gamma=0.85,
                         add_mdtable=False,
