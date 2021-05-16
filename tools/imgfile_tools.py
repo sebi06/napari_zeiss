@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 
 #################################################################
-# File        : imgfil_tools.py
-# Version     : 1.6.1
+# File        : imgfile_tools.py
+# Version     : 1.6.2
 # Author      : czsrh
-# Date        : 17.02.2021
+# Date        : 21.03.2021
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Disclaimer: This tool is purely experimental. Feel free to
@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 import xmltodict
 import numpy as np
-import czifile_tools as czt
+import czifiletools.fileutils as czt
 from collections import Counter
 from lxml import etree as ET
 import sys
@@ -32,37 +32,6 @@ import pandas as pd
 import tifffile
 import pydash
 import zarr
-
-try:
-    import napari
-except ModuleNotFoundError as error:
-    print(error.__class__.__name__ + ": " + error.msg)
-
-from PyQt5.QtWidgets import (
-
-    QHBoxLayout,
-    QVBoxLayout,
-    QFileSystemModel,
-    QFileDialog,
-    QTreeView,
-    QDialogButtonBox,
-    QWidget,
-    QTableWidget,
-    QTableWidgetItem,
-    QCheckBox,
-    QAbstractItemView,
-    QComboBox,
-    QPushButton,
-    QLineEdit,
-    QLabel,
-    QGridLayout
-
-)
-
-from PyQt5.QtCore import Qt, QDir, QSortFilterProxyModel
-from PyQt5.QtCore import pyqtSlot
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtGui import QFont
 
 
 def get_imgtype(imagefile):
@@ -394,6 +363,7 @@ def get_metadata_czi(filename, dim2none=False,
     metadatadict_czi = czi.metadata(raw=False)
 
     # initialize metadata dictionary
+    #metadata = {}
     metadata = create_metadata_dict()
 
     # get directory and filename etc.
@@ -449,6 +419,8 @@ def get_metadata_czi(filename, dim2none=False,
     # on the last dimension entry of axes
     if czi.shape[-1] == 3:
         metadata['czi_isRGB'] = True
+    if czi.shape[-1] != 3:
+        metadata['czi_isRGB'] = False
     print('CZI is RGB :', metadata['czi_isRGB'])
 
     try:
@@ -693,120 +665,121 @@ def get_metadata_czi(filename, dim2none=False,
 
     # check if Instrument metadat actually exist
     if pydash.objects.has(metadatadict_czi, ['ImageDocument', 'Metadata', 'Information', 'Instrument']):
-        # get objective data
-        if isinstance(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'], list):
-            num_obj = len(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'])
-        else:
-            num_obj = 1
+        if metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument'] is not None:
+            # get objective data
+            if isinstance(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'], list):
+                num_obj = len(metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective'])
+            else:
+                num_obj = 1
 
-        # if there is only one objective found
-        if num_obj == 1:
-            try:
-                metadata['ObjName'].append(metadatadict_czi['ImageDocument']['Metadata']['Information']
-                                           ['Instrument']['Objectives']['Objective']['Name'])
-            except (KeyError, TypeError) as e:
-                print('No Objective Name :', e)
-                metadata['ObjName'].append(None)
-
-            try:
-                metadata['ObjImmersion'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['Immersion']
-            except (KeyError, TypeError) as e:
-                print('No Objective Immersion :', e)
-                metadata['ObjImmersion'] = None
-
-            try:
-                metadata['ObjNA'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
-                                             ['Instrument']['Objectives']['Objective']['LensNA'])
-            except (KeyError, TypeError) as e:
-                print('No Objective NA :', e)
-                metadata['ObjNA'] = None
-
-            try:
-                metadata['ObjID'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['Id']
-            except (KeyError, TypeError) as e:
-                print('No Objective ID :', e)
-                metadata['ObjID'] = None
-
-            try:
-                metadata['TubelensMag'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
-                                                   ['Instrument']['TubeLenses']['TubeLens']['Magnification'])
-            except (KeyError, TypeError) as e:
-                print('No Tubelens Mag. :', e, 'Using Default Value = 1.0.')
-                metadata['TubelensMag'] = 1.0
-
-            try:
-                metadata['ObjNominalMag'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
-                                                     ['Instrument']['Objectives']['Objective']['NominalMagnification'])
-            except (KeyError, TypeError) as e:
-                print('No Nominal Mag.:', e, 'Using Default Value = 1.0.')
-                metadata['ObjNominalMag'] = 1.0
-
-            try:
-                if metadata['TubelensMag'] is not None:
-                    metadata['ObjMag'] = metadata['ObjNominalMag'] * metadata['TubelensMag']
-                if metadata['TubelensMag'] is None:
-                    print('Using Tublens Mag = 1.0 for calculating Objective Magnification.')
-                    metadata['ObjMag'] = metadata['ObjNominalMag'] * 1.0
-
-            except (KeyError, TypeError) as e:
-                print('No Objective Magnification :', e)
-                metadata['ObjMag'] = None
-
-        if num_obj > 1:
-            for o in range(num_obj):
-
+            # if there is only one objective found
+            if num_obj == 1:
                 try:
                     metadata['ObjName'].append(metadatadict_czi['ImageDocument']['Metadata']['Information']
-                                               ['Instrument']['Objectives']['Objective'][o]['Name'])
-                except KeyError as e:
+                                               ['Instrument']['Objectives']['Objective']['Name'])
+                except (KeyError, TypeError) as e:
                     print('No Objective Name :', e)
                     metadata['ObjName'].append(None)
 
                 try:
-                    metadata['ObjImmersion'].append(metadatadict_czi['ImageDocument']['Metadata']['Information']
-                                                    ['Instrument']['Objectives']['Objective'][o]['Immersion'])
-                except KeyError as e:
+                    metadata['ObjImmersion'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['Immersion']
+                except (KeyError, TypeError) as e:
                     print('No Objective Immersion :', e)
-                    metadata['ObjImmersion'].append(None)
+                    metadata['ObjImmersion'] = None
 
                 try:
-                    metadata['ObjNA'].append(np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
-                                                      ['Instrument']['Objectives']['Objective'][o]['LensNA']))
-                except KeyError as e:
+                    metadata['ObjNA'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                 ['Instrument']['Objectives']['Objective']['LensNA'])
+                except (KeyError, TypeError) as e:
                     print('No Objective NA :', e)
-                    metadata['ObjNA'].append(None)
+                    metadata['ObjNA'] = None
 
                 try:
-                    metadata['ObjID'].append(metadatadict_czi['ImageDocument']['Metadata']['Information']
-                                             ['Instrument']['Objectives']['Objective'][o]['Id'])
-                except KeyError as e:
+                    metadata['ObjID'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Instrument']['Objectives']['Objective']['Id']
+                except (KeyError, TypeError) as e:
                     print('No Objective ID :', e)
-                    metadata['ObjID'].append(None)
+                    metadata['ObjID'] = None
 
                 try:
-                    metadata['TubelensMag'].append(np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
-                                                            ['Instrument']['TubeLenses']['TubeLens'][o]['Magnification']))
-                except KeyError as e:
+                    metadata['TubelensMag'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                       ['Instrument']['TubeLenses']['TubeLens']['Magnification'])
+                except (KeyError, TypeError) as e:
                     print('No Tubelens Mag. :', e, 'Using Default Value = 1.0.')
-                    metadata['TubelensMag'].append(1.0)
+                    metadata['TubelensMag'] = 1.0
 
                 try:
-                    metadata['ObjNominalMag'].append(np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
-                                                              ['Instrument']['Objectives']['Objective'][o]['NominalMagnification']))
-                except KeyError as e:
-                    print('No Nominal Mag. :', e, 'Using Default Value = 1.0.')
-                    metadata['ObjNominalMag'].append(1.0)
+                    metadata['ObjNominalMag'] = np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                         ['Instrument']['Objectives']['Objective']['NominalMagnification'])
+                except (KeyError, TypeError) as e:
+                    print('No Nominal Mag.:', e, 'Using Default Value = 1.0.')
+                    metadata['ObjNominalMag'] = 1.0
 
                 try:
                     if metadata['TubelensMag'] is not None:
-                        metadata['ObjMag'].append(metadata['ObjNominalMag'][o] * metadata['TubelensMag'][o])
+                        metadata['ObjMag'] = metadata['ObjNominalMag'] * metadata['TubelensMag']
                     if metadata['TubelensMag'] is None:
                         print('Using Tublens Mag = 1.0 for calculating Objective Magnification.')
-                        metadata['ObjMag'].append(metadata['ObjNominalMag'][o] * 1.0)
+                        metadata['ObjMag'] = metadata['ObjNominalMag'] * 1.0
 
-                except KeyError as e:
+                except (KeyError, TypeError) as e:
                     print('No Objective Magnification :', e)
-                    metadata['ObjMag'].append(None)
+                    metadata['ObjMag'] = None
+
+            if num_obj > 1:
+                for o in range(num_obj):
+
+                    try:
+                        metadata['ObjName'].append(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                   ['Instrument']['Objectives']['Objective'][o]['Name'])
+                    except KeyError as e:
+                        print('No Objective Name :', e)
+                        metadata['ObjName'].append(None)
+
+                    try:
+                        metadata['ObjImmersion'].append(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                        ['Instrument']['Objectives']['Objective'][o]['Immersion'])
+                    except KeyError as e:
+                        print('No Objective Immersion :', e)
+                        metadata['ObjImmersion'].append(None)
+
+                    try:
+                        metadata['ObjNA'].append(np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                          ['Instrument']['Objectives']['Objective'][o]['LensNA']))
+                    except KeyError as e:
+                        print('No Objective NA :', e)
+                        metadata['ObjNA'].append(None)
+
+                    try:
+                        metadata['ObjID'].append(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                 ['Instrument']['Objectives']['Objective'][o]['Id'])
+                    except KeyError as e:
+                        print('No Objective ID :', e)
+                        metadata['ObjID'].append(None)
+
+                    try:
+                        metadata['TubelensMag'].append(np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                                ['Instrument']['TubeLenses']['TubeLens'][o]['Magnification']))
+                    except KeyError as e:
+                        print('No Tubelens Mag. :', e, 'Using Default Value = 1.0.')
+                        metadata['TubelensMag'].append(1.0)
+
+                    try:
+                        metadata['ObjNominalMag'].append(np.float(metadatadict_czi['ImageDocument']['Metadata']['Information']
+                                                                  ['Instrument']['Objectives']['Objective'][o]['NominalMagnification']))
+                    except KeyError as e:
+                        print('No Nominal Mag. :', e, 'Using Default Value = 1.0.')
+                        metadata['ObjNominalMag'].append(1.0)
+
+                    try:
+                        if metadata['TubelensMag'] is not None:
+                            metadata['ObjMag'].append(metadata['ObjNominalMag'][o] * metadata['TubelensMag'][o])
+                        if metadata['TubelensMag'] is None:
+                            print('Using Tublens Mag = 1.0 for calculating Objective Magnification.')
+                            metadata['ObjMag'].append(metadata['ObjNominalMag'][o] * 1.0)
+
+                    except KeyError as e:
+                        print('No Objective Magnification :', e)
+                        metadata['ObjMag'].append(None)
 
     # get detector information
 
@@ -1140,75 +1113,6 @@ def get_dimorder(dimstring):
     return dims_dict, dimindex_list, numvalid_dims
 
 
-def get_array_czi(filename,
-                  replace_value=False,
-                  remove_HDim=True,
-                  return_addmd=False,
-                  forceDim=False,
-                  forceDimname='SizeC',
-                  forceDimvalue=2):
-    """Get the pixel data of the CZI file as multidimensional NumPy.Array
-
-    :param filename: filename of the CZI file
-    :type filename: str
-    :param replacevalue: replace arrays entries with a specific value with NaN, defaults to False
-    :type replacevalue: bool, optional
-    :param remove_HDim: remove the H-Dimension (Airy Scan Detectors), defaults to True
-    :type remove_HDim: bool, optional
-    :param return_addmd: read the additional metadata, defaults to False
-    :type return_addmd: bool, optional
-    :param forceDim: force a specfic dimension to have a specif value, defaults to False
-    :type forceDim: bool, optional
-    :param forceDimname: name of the dimension, defaults to 'SizeC'
-    :type forceDimname: str, optional
-    :param forceDimvalue: value of the dimension, defaults to 2
-    :type forceDimvalue: int, optional
-    :return: cziarray - dictionary with the dimensions and its positions
-    :rtype: NumPy.Array
-    :return: metadata - dictionary with CZI metadata
-    :rtype: dict
-    :return: additional_metadata_czi - dictionary with additional CZI metadata
-    :rtype: dict
-    """
-
-    metadata = get_metadata_czi(filename,
-                                forceDim=forceDim,
-                                forceDimname=forceDimname,
-                                forceDimvalue=forceDimvalue)
-
-    # get additional metainformation
-    additional_metadata_czi = get_additional_metadata_czi(filename)
-
-    # get CZI object and read array
-    czi = zis.CziFile(filename)
-    cziarray = czi.asarray()
-
-    # check for H dimension and remove
-    if remove_HDim and metadata['Axes_czifile'][0] == 'H':
-        # metadata['Axes'] = metadata['Axes_czifile'][1:]
-        metadata['Axes_czifile'] = metadata['Axes_czifile'].replace('H', '')
-        cziarray = np.squeeze(cziarray, axis=0)
-
-    # get additional information about dimension order etc.
-    dim_dict, dim_list, numvalid_dims = get_dimorder(metadata['Axes_czifile'])
-    metadata['DimOrder CZI'] = dim_dict
-
-    if cziarray.shape[-1] == 3:
-        pass
-    else:
-        # remove the last dimension from the end
-        cziarray = np.squeeze(cziarray, axis=len(metadata['Axes_czifile']) - 1)
-        metadata['Axes_czifile'] = metadata['Axes_czifile'].replace('0', '')
-
-    if replace_value:
-        cziarray = replace_value(cziarray, value=0)
-
-    # close czi file
-    czi.close()
-
-    return cziarray, metadata, additional_metadata_czi
-
-
 def replace_value(data, value=0):
     """Replace specifc values in array with NaN
 
@@ -1249,138 +1153,6 @@ def get_scalefactor(metadata):
         print(e, 'Using defaults = 1.0')
 
     return scalefactors
-
-
-def calc_scaling(data, corr_min=1.0,
-                 offset_min=0,
-                 corr_max=0.85,
-                 offset_max=0):
-    """[summary]
-
-    :param data: Calculate min / max scaling
-    :type data: Numpy.Array
-    :param corr_min: correction factor for minvalue, defaults to 1.0
-    :type corr_min: float, optional
-    :param offset_min: offset for min value, defaults to 0
-    :type offset_min: int, optional
-    :param corr_max: correction factor for max value, defaults to 0.85
-    :type corr_max: float, optional
-    :param offset_max: offset for max value, defaults to 0
-    :type offset_max: int, optional
-    :return: list with [minvalue, maxvalue]
-    :rtype: list
-    """
-
-    if isinstance(data, zarr.Array):
-        minvalue = np.min(data)
-        maxvalue = np.max(data)
-
-    elif isinstance(data, da.Array):
-        minvalue = data.compute().min()
-        maxvalue = data.compute().max()
-
-    else:  # get min-max values for initial scaling
-        minvalue = data.min()
-        maxvalue = data.max()
-
-    minvalue = np.round((minvalue + offset_min) * corr_min)
-    maxvalue = np.round((maxvalue + offset_max) * corr_max)
-
-    print('Scaling:', minvalue, maxvalue)
-
-    return [minvalue, maxvalue]
-
-
-def show_napari(viewer, array, metadata,
-                blending='additive',
-                gamma=0.85,
-                add_mdtable=True,
-                rename_sliders=False):
-    """Show the multidimensional array using the Napari viewer
-
-    :param viwer: Instnave of the napari viewer
-    :type array: NapariViewer
-    :param array: multidimensional NumPy.Array containing the pixeldata
-    :type array: NumPy.Array
-    :param metadata: dictionary with CZI or OME-TIFF metadata
-    :type metadata: dict
-    :param blending: NapariViewer option for blending, defaults to 'additive'
-    :type blending: str, optional
-    :param gamma: NapariViewer value for Gamma, defaults to 0.85
-    :type gamma: float, optional
-    :param rename_sliders: name slider with correct labels output, defaults to False
-    :type verbose: bool, optional
-    """
-
-    # create list for the napari layers
-    napari_layers = []
-
-    # create scalefcator with all ones
-    scalefactors = [1.0] * len(array.shape)
-
-    # use the dimension string from AICSImageIO 6D
-    dimpos = get_dimpositions(metadata['Axes_aics'])
-
-    # get the scalefactors from the metadata
-    scalef = get_scalefactor(metadata)
-
-    # modify the tuple for the scales for napari
-    scalefactors[dimpos['Z']] = scalef['zx']
-
-    # remove C dimension from scalefactor
-    scalefactors_ch = scalefactors.copy()
-    del scalefactors_ch[dimpos['C']]
-
-    # add widget for metadata
-    if add_mdtable:
-
-        # create widget for the metadata
-        mdbrowser = TableWidget()
-
-        viewer.window.add_dock_widget(mdbrowser,
-                                      name='mdbrowser',
-                                      area='right')
-
-        # add the metadata and adapt the table display
-        mdbrowser.update_metadata(metadata)
-        mdbrowser.update_style()
-
-    # add all channels as layers
-    for ch in range(metadata['SizeC']):
-
-        try:
-            # get the channel name
-            chname = metadata['Channels'][ch]
-        except KeyError as e:
-            print(e)
-            # or use CH1 etc. as string for the name
-            chname = 'CH' + str(ch + 1)
-
-        # cut out channel
-        channel = slicedim(array, ch, dimpos['C'])
-
-        # actually show the image array
-        print('Adding Channel  :', chname)
-        print('Shape Channel   :', ch, channel.shape)
-        print('Scaling Factors :', scalefactors_ch)
-
-        # add channel to napari viewer
-        new_layer = viewer.add_image(channel,
-                                     name=chname,
-                                     scale=scalefactors_ch,
-                                     blending=blending,
-                                     gamma=gamma)
-
-        napari_layers.append(new_layer)
-
-    if rename_sliders:
-
-        print('Renaming the Sliders based on the Dimension String ....')
-
-        # get the label of the sliders (as a tuple) ad rename it
-        viewer.dims.axis_labels = napari_rename_sliders(viewer.dims.axis_labels, metadata['Axes_aics'])
-
-    return napari_layers
 
 
 def check_for_previewimage(czi):
@@ -1437,37 +1209,6 @@ def writexml_czi(filename, xmlsuffix='_CZI_MetaData.xml'):
     return xmlfile
 
 
-def writexml_ometiff(filename, xmlsuffix='_OMETIFF_MetaData.xml'):
-    """Write XML imformation of OME-TIFF to disk
-
-    :param filename: OME-TIFF image filename
-    :type filename: str
-    :param xmlsuffix: suffix for the XML file that will be created, defaults to '_OMETIFF_MetaData.xml'
-    :type xmlsuffix: str, optional
-    :return: filename of the XML file
-    :rtype: str
-    """
-
-    if filename.lower().endswith('.ome.tiff'):
-        ext = '.ome.tiff'
-    if filename.lower().endswith('.ome.tif'):
-        ext = '.ome.tif'
-
-    with tifffile.TiffFile(filename) as tif:
-        omexml_string = tif.ome_metadata
-
-    # get tree from string
-    tree = ET.ElementTree(ET.fromstring(omexml_string.encode('utf-8')))
-
-    # change file name
-    xmlfile = filename.replace(ext, xmlsuffix)
-
-    tree.write(xmlfile, encoding='utf-8', method='xml', pretty_print=True)
-    print('Created OME-XML file for testdata:', filename)
-
-    return xmlfile
-
-
 def getImageSeriesIDforWell(welllist, wellID):
     """
     Returns all ImageSeries (for OME-TIFF) indicies for a specific wellID
@@ -1505,106 +1246,6 @@ def addzeros(number):
         zerostring = '0' + str(number)
 
     return zerostring
-
-
-def write_ometiff(filepath, img,
-                  scalex=0.1,
-                  scaley=0.1,
-                  scalez=1.0,
-                  dimorder='TZCYX',
-                  pixeltype=np.uint16,
-                  swapxyaxes=True,
-                  series=1):
-    """ONLY FOR INTERNAL TESTING - DO NOT USE!
-
-    This function will write an OME-TIFF file to disk.
-    The out 6D array has the following dimension order:
-
-    [T, Z, C, Y, X] if swapxyaxes = True
-
-    [T, Z, C, X, Y] if swapxyaxes = False
-    """
-
-    # Dimension STZCXY
-    if swapxyaxes:
-        # swap xy to write the OME-Stack with the correct shape
-        SizeT = img.shape[0]
-        SizeZ = img.shape[1]
-        SizeC = img.shape[2]
-        SizeX = img.shape[4]
-        SizeY = img.shape[3]
-
-    if not swapxyaxes:
-        SizeT = img.shape[0]
-        SizeZ = img.shape[1]
-        SizeC = img.shape[2]
-        SizeX = img.shape[3]
-        SizeY = img.shape[4]
-
-    # Getting metadata info
-    omexml = bioformats.omexml.OMEXML()
-    omexml.image(series - 1).Name = filepath
-
-    for s in range(series):
-        p = omexml.image(s).Pixels
-        p.ID = str(s)
-        p.SizeX = SizeX
-        p.SizeY = SizeY
-        p.SizeC = SizeC
-        p.SizeT = SizeT
-        p.SizeZ = SizeZ
-        p.PhysicalSizeX = np.float(scalex)
-        p.PhysicalSizeY = np.float(scaley)
-        p.PhysicalSizeZ = np.float(scalez)
-        if pixeltype == np.uint8:
-            p.PixelType = 'uint8'
-        if pixeltype == np.uint16:
-            p.PixelType = 'uint16'
-        p.channel_count = SizeC
-        p.plane_count = SizeZ * SizeT * SizeC
-        p = writeOMETIFFplanes(p, SizeT=SizeT, SizeZ=SizeZ, SizeC=SizeC, order=dimorder)
-
-        for c in range(SizeC):
-            # if pixeltype == 'unit8':
-            if pixeltype == np.uint8:
-                p.Channel(c).SamplesPerPixel = 1
-
-            if pixeltype == np.uint16:
-                p.Channel(c).SamplesPerPixel = 2
-
-        omexml.structured_annotations.add_original_metadata(bioformats.omexml.OM_SAMPLES_PER_PIXEL, str(SizeC))
-
-    # Converting to omexml
-    xml = omexml.to_xml(encoding='utf-8')
-
-    # write file and save OME-XML as description
-    tifffile.imwrite(filepath, img, metadata={'axes': dimorder}, description=xml)
-
-    return filepath
-
-
-def writeOMETIFFplanes(pixel, SizeT=1, SizeZ=1, SizeC=1, order='TZCXY', verbose=False):
-    """ONLY FOR INTERNAL TESTING - DO NOT USE!
-
-    """
-    if order == 'TZCYX' or order == 'TZCXY':
-
-        pixel.DimensionOrder = bioformats.omexml.DO_XYCZT
-        counter = 0
-        for t in range(SizeT):
-            for z in range(SizeZ):
-                for c in range(SizeC):
-
-                    if verbose:
-                        print('Write PlaneTable:', t, z, c),
-                        sys.stdout.flush()
-
-                    pixel.Plane(counter).TheT = t
-                    pixel.Plane(counter).TheZ = z
-                    pixel.Plane(counter).TheC = c
-                    counter = counter + 1
-
-    return pixel
 
 
 def write_ometiff_aicsimageio(savepath, imgarray, metadata,
@@ -1718,44 +1359,6 @@ def write_ometiff_aicsimageio(savepath, imgarray, metadata,
     return savepath
 
 
-def correct_omeheader(omefile,
-                      old=("2012-03", "2013-06", r"ome/2016-06"),
-                      new=("2016-06", "2016-06", r"OME/2016-06")
-                      ):
-    """This function is actually a workaround for AICSImageIO<=3.1.4 that
-    correct some incorrect namespaces inside the OME-XML header
-
-    :param omefile: OME-TIFF image file
-    :type omefile: string
-    :param old: strings that should be corrected, defaults to ("2012-03", "2013-06", r"ome/2016-06")
-    :type old: tuple, optional
-    :param new: replacement for the strings to be corrected, defaults to ("2016-06", "2016-06", r"OME/2016-06")
-    :type new: tuple, optional
-    """
-
-    # create the tif object from the filename
-    tif = tifffile.TiffFile(omefile)
-
-    # get the pixel array and the OME-XML string
-    array = tif.asarray()
-    omexml_string = tif.ome_metadata
-
-    # search for the strings to be replaced and do it
-    for ostr, nstr in zip(old, new):
-        print('Replace:', ostr, 'with', nstr)
-        omexml_string = omexml_string.replace(ostr, nstr)
-
-    # save the file with the new, correct strings
-    tifffile.imsave(omefile, array,
-                    photometric='minisblack',
-                    description=omexml_string)
-
-    # close tif object
-    tif.close()
-
-    print('Updated OME Header.')
-
-
 def get_fname_woext(filepath):
     """Get the complete path of a file without the extension
     It alos will works for extensions like c:\myfile.abc.xyz
@@ -1867,30 +1470,6 @@ def get_dimpositions(dimstring, tocheck=['B', 'S', 'T', 'Z', 'C']):
     return dimpos
 
 
-def norm_columns(df, colname='Time [s]', mode='min'):
-    """Normalize a specif column inside a Pandas dataframe
-
-    :param df: DataFrame
-    :type df: pf.DataFrame
-    :param colname: Name of the coumn to be normalized, defaults to 'Time [s]'
-    :type colname: str, optional
-    :param mode: Mode of Normalization, defaults to 'min'
-    :type mode: str, optional
-    :return: Dataframe with normalized column
-    :rtype: pd.DataFrame
-    """
-    # normalize columns according to min or max value
-    if mode == 'min':
-        min_value = df[colname].min()
-        df[colname] = df[colname] - min_value
-
-    if mode == 'max':
-        max_value = df[colname].max()
-        df[colname] = df[colname] - max_value
-
-    return df
-
-
 def update5dstack(image5d, image2d,
                   dimstring5d='TCZYX',
                   t=0,
@@ -1930,85 +1509,6 @@ def getdims_pylibczi(czi):
     return dimsizes
 
 
-def calc_normvar(img2d):
-    """Determine normalized focus value for a 2D image
-    - based on algorithm F - 11 "Normalized Variance"
-    - Taken from: Sun et al., 2004. MICROSCOPY RESEARCH AND TECHNIQUE 65, 139–149.
-    - Maximum value is best-focused, decreasing as defocus increases
-
-    :param img2d: 2D image
-    :type img2d: NumPy.Array
-    :return: normalized focus value for the 2D image
-    :rtype: float
-    """
-
-    mean = np.mean(img2d)
-    height = img2d.shape[0]
-    width = img2d.shape[1]
-
-    # subtract the mean and sum up the whole array
-    fi = (img2d - mean)**2
-    b = np.sum(fi)
-
-    # calculate the normalized variance value
-    normvar = b / (height * width * mean)
-
-    return normvar
-
-
-class TableWidget(QWidget):
-
-    def __init__(self):
-        super(QWidget, self).__init__()
-        self.layout = QVBoxLayout(self)
-        self.mdtable = QTableWidget()
-        self.layout.addWidget(self.mdtable)
-        self.mdtable.setShowGrid(True)
-        self.mdtable.setHorizontalHeaderLabels(['Parameter', 'Value'])
-        header = self.mdtable.horizontalHeader()
-        header.setDefaultAlignment(Qt.AlignLeft)
-
-    def update_metadata(self, metadata):
-
-        # number of rows is set to number of metadata entries
-        row_count = len(metadata)
-        col_count = 2
-        self.mdtable.setColumnCount(col_count)
-        self.mdtable.setRowCount(row_count)
-
-        row = 0
-
-        # update the table with the entries from metadata dictionary
-        for key, value in metadata.items():
-            newkey = QTableWidgetItem(key)
-            self.mdtable.setItem(row, 0, newkey)
-            newvalue = QTableWidgetItem(str(value))
-            self.mdtable.setItem(row, 1, newvalue)
-            row += 1
-
-        # fit columns to content
-        self.mdtable.resizeColumnsToContents()
-
-    def update_style(self):
-
-        # define font size and type
-        fnt = QFont()
-        fnt.setPointSize(11)
-        fnt.setBold(True)
-        fnt.setFamily('Arial')
-
-        # update both header items
-        item1 = QtWidgets.QTableWidgetItem('Parameter')
-        item1.setForeground(QtGui.QColor(25, 25, 25))
-        item1.setFont(fnt)
-        self.mdtable.setHorizontalHeaderItem(0, item1)
-
-        item2 = QtWidgets.QTableWidgetItem('Value')
-        item2.setForeground(QtGui.QColor(25, 25, 25))
-        item2.setFont(fnt)
-        self.mdtable.setHorizontalHeaderItem(1, item2)
-
-
 # function to return key for any value
 def get_key(my_dict, val):
     """Get the key based on a value
@@ -2027,83 +1527,14 @@ def get_key(my_dict, val):
     return None
 
 
-def slicedim(array, dimindex, posdim):
-    """slice out a specific channel without (!) dropping the dimsion
-    # of the array to conserve the dimorder string
-    # this should work for Numpy.Array, Dask and ZARR ...
+def expand_dims5d(array, metadata):
 
-    :param array: The array to be sliced
-    :type array: Numpy.Array, dask.Array, zarr.Array
-    :param dimindex: index to be sliced out at a given dimension
-    :type dimindex: int
-    :param posdim: index of the dimension where the slicing should take place
-    :type posdim: int
-    :return: sliced array
-    :rtype: Numpy.Array, dask.array, zarr.array
-    """
+    # Expand image array to 5D of order (T, Z, C, X, Y)
+    if metadata['SizeC'] == 1:
+        array = np.expand_dims(array, axis=-3)
+    if metadata['SizeZ'] == 1:
+        array = np.expand_dims(array, axis=-4)
+    if metadata['SizeT'] == 1:
+        array = np.expand_dims(array, axis=-5)
 
-    if posdim == 0:
-        array_sliced = array[dimindex:dimindex + 1, ...]
-    if posdim == 1:
-        array_sliced = array[:, dimindex:dimindex + 1, ...]
-    if posdim == 2:
-        array_sliced = array[:, :, dimindex:dimindex + 1, ...]
-    if posdim == 3:
-        array_sliced = array[:, :, :, dimindex:dimindex + 1, ...]
-    if posdim == 4:
-        array_sliced = array[:, :, :, :, dimindex:dimindex + 1, ...]
-    if posdim == 5:
-        array_sliced = array[:, :, :, :, :, dimindex:dimindex + 1, ...]
-
-    """
-    # old way to it differently
-    
-    if isinstance(array, da.Array):
-        print('Extract Channel as Dask.Array')
-        channel = slicedimC(array, ch, dimpos['C'])
-        # channel = array.compute().take(ch, axis=dimpos['C'])
-    if isinstance(array, zarr.Array):
-        print('Extract Channel as Dask.Array')
-        channel = slicedimC(array, ch, dimpos['C'])
-    if isinstance(array, np.ndarray):
-        # use normal numpy if not
-        print('Extract Channel as NumPy.Array')
-        channel = array.take(ch, axis=dimpos['C'])
-    """
-
-    return array_sliced
-
-
-def napari_rename_sliders(sliders, axes_aics):
-    """Rename the sliders of the Napari viewer accoring to the dimensions.
-
-    :param sliders: Tupe containing the slider label
-    :type sliders: tuple
-    :param axes_aics: Dimension string using AICSImageIO
-    :type axes_aics: str
-    :return: Tuple with new slider labels
-    :rtype: tuple
-    """
-
-    # get the positions of dimension entries after removing C dimension
-    dimpos_viewer = get_dimpositions(axes_aics)
-
-    # update the labels with the correct dimension strings
-    slidernames = ['B', 'H', 'V', 'M', 'S', 'T', 'Z']
-
-    # convert to list()
-    tmp_sliders = list(sliders)
-
-    for s in slidernames:
-        try:
-            if dimpos_viewer[s] >= 0:
-
-                # assign the dimension labels
-                tmp_sliders[dimpos_viewer[s]] = s
-
-                # convert back to tuple
-                sliders = tuple(tmp_sliders)
-        except KeyError:
-            print('No', s, 'Dimension found')
-
-    return sliders
+    return array

@@ -2,9 +2,9 @@
 
 #################################################################
 # File        : napari_browser_cz.py
-# Version     : 0.2.0
+# Version     : 0.3.0
 # Author      : czsrh
-# Date        : 17.02.2021
+# Date        : 14.05.2021
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Disclaimer: This tool is purely experimental. Feel free to
@@ -46,9 +46,9 @@ import sys
 import napari
 import numpy as np
 from aicspylibczi import CziFile
-#from czitools import imgfile_tools as imf
-import imgfile_tools as imf
-import czifile_tools as czt
+import tools.imgfile_tools as imf
+import tools.fileutils as czt
+import tools.napari_tools as nap
 from aicsimageio import AICSImage
 import dask
 import dask.array as da
@@ -56,61 +56,6 @@ import zarr
 import os
 from zencontrol import ZenExperiment, ZenDocuments
 from pathlib import Path
-
-
-class TableWidget(QWidget):
-
-    def __init__(self):
-
-        super(QWidget, self).__init__()
-
-        self.layout = QVBoxLayout(self)
-        self.mdtable = QTableWidget()
-        self.layout.addWidget(self.mdtable)
-        self.mdtable.setShowGrid(True)
-        self.mdtable.setHorizontalHeaderLabels(['Parameter', 'Value'])
-        header = self.mdtable.horizontalHeader()
-        header.setDefaultAlignment(Qt.AlignLeft)
-
-    def update_metadata(self, metadata):
-
-        # number of rows is set to number of metadata entries
-        row_count = len(metadata)
-        col_count = 2
-        self.mdtable.setColumnCount(col_count)
-        self.mdtable.setRowCount(row_count)
-
-        row = 0
-
-        # update the table with the entries from metadata dictionary
-        for key, value in metadata.items():
-            newkey = QTableWidgetItem(key)
-            self.mdtable.setItem(row, 0, newkey)
-            newvalue = QTableWidgetItem(str(value))
-            self.mdtable.setItem(row, 1, newvalue)
-            row += 1
-
-        # fit columns to content
-        self.mdtable.resizeColumnsToContents()
-
-    def update_style(self):
-
-        # define font size and type
-        fnt = QFont()
-        fnt.setPointSize(11)
-        fnt.setBold(True)
-        fnt.setFamily('Arial')
-
-        # update both header items
-        item1 = QtWidgets.QTableWidgetItem('Parameter')
-        item1.setForeground(QtGui.QColor(25, 25, 25))
-        item1.setFont(fnt)
-        self.mdtable.setHorizontalHeaderItem(0, item1)
-
-        item2 = QtWidgets.QTableWidgetItem('Value')
-        item2.setForeground(QtGui.QColor(25, 25, 25))
-        item2.setFont(fnt)
-        self.mdtable.setHorizontalHeaderItem(1, item2)
 
 
 class FileTree(QWidget):
@@ -123,18 +68,21 @@ class FileTree(QWidget):
 
         # define the style for the FileTree via s style sheet
         self.setStyleSheet("""
-            QTreeView: : item {
-            background - color: rgb(38, 41, 48);
-            font-weight: bold;}
+                     QTreeView:: item {
+                         background - color: rgb(38, 41, 48)
+                         font - weight: bold
+                     }
 
-            QTreeView: : item: : selected {
-            background - color: rgb(38, 41, 48);
-            color: rgb(0, 255, 0); }
+                     QTreeView:: item: : selected {
+                         background - color: rgb(38, 41, 48)
+                         color: rgb(0, 255, 0)
+                     }
 
-            QTreeView QHeaderView: section {
-            background - color: rgb(38, 41, 48);
-            color: rgb(255, 255, 255);}
-            """)
+                     QTreeView QHeaderView: section {
+                         background - color: rgb(38, 41, 48)
+                         color: rgb(255, 255, 255)
+                     }
+                     """)
 
         self.model = QFileSystemModel()
         self.model.setRootPath(defaultfolder)
@@ -197,10 +145,20 @@ class OptionsWidget(QWidget):
                                         )
         self.grid_opt.addWidget(self.cbox_openczi, 1, 0)
 
+        # add checkbox to toggle automatic scaling
+        self.cbox_autoscale = QCheckBox("AutoScale per Channel (on open)", self)
+        self.cbox_autoscale.setChecked(False)
+        self.cbox_autoscale.setStyleSheet("font:bold;"
+                                          "font-size: 10px;"
+                                          "width :14px;"
+                                          "height :14px;"
+                                          )
+        self.grid_opt.addWidget(self.cbox_autoscale, 2, 0)
+
 
 class FileBrowser(QWidget):
 
-    def __init__(self, defaultfolder=r'c:\Zen_Output'):
+    def __init__(self, filter="Images(*.czi)", defaultfolder=r'c:\Zen_Output'):
 
         super(QWidget, self).__init__()
         self.layout = QHBoxLayout(self)
@@ -215,7 +173,7 @@ class FileBrowser(QWidget):
         self.buttonBox.clear()
 
         # only show the following file types
-        self.file_dialog.setNameFilter("Images (*.czi *.ome.tiff *ome.tif *.tiff *.tif)")
+        self.file_dialog.setNameFilter(filter)
         self.layout.addWidget(self.file_dialog)
         self.file_dialog.currentChanged.connect(open_image_stack)
 
@@ -304,15 +262,15 @@ class StartExperiment(QWidget):
         QtWidgets.QApplication.processEvents()
 
         # option to use Dask Delayed reader
-        #use_dask = checkboxes.cbox_dask.isChecked()
-        #print("Use Dask Reader : ", use_dask)
+        use_dask = checkboxes.cbox_dask.isChecked()
+        print("Use Dask Reader : ", use_dask)
 
         # open the just acquired CZI and show it inside napari viewer
         if self.saved_czifilepath is not None:
             open_image_stack(self.saved_czifilepath)
 
 
-def open_image_stack(filepath, force_dask=False):
+def open_image_stack(filepath):
     """ Open a file using AICSImageIO and display it using napari
 
     :param path: filepath of the image
@@ -368,20 +326,13 @@ def open_image_stack(filepath, force_dask=False):
             # get AICSImageIO object
             img = AICSImage(filepath)
 
-            if not force_dask:
-                try:
-                    # check if the Dask Delayed Reader should be used
-                    if not checkboxes.cbox_dask.isChecked():
-                        print('Using AICSImageIO normal ImageReader.')
-                        all_scenes_array = img.get_image_data()
-                    if checkboxes.cbox_dask.isChecked():
-                        print('Using AICSImageIO Dask Delayed ImageReader')
-                        all_scenes_array = img.get_image_dask_data()
-                except Exception as e:
-                    print(e, 'No Checkboxes found. Using normal ImageReader.')
-            if force_dask:
-                print('Using Dask Delayed ImageReader')
-                all_scenes_array = img.get_image_dask_data()
+        # check if the Dask Delayed Reader should be used
+        if not checkboxes.cbox_dask.isChecked():
+            print('Using AICSImageIO normal ImageReader.')
+            all_scenes_array = img.get_image_data()
+        if checkboxes.cbox_dask.isChecked():
+            print('Using AICSImageIO Dask Delayed ImageReader')
+            all_scenes_array = img.get_image_dask_data()
 
         if not use_aicsimageio and use_pylibczi is True:
 
@@ -437,9 +388,12 @@ def open_image_stack(filepath, force_dask=False):
                 all_scenes_array = da.stack(dask_arrays, axis=0)
                 print(all_scenes_array.shape)
 
+        do_scaling = checkboxes.cbox_autoscale.isChecked()
+
         # show the actual image stack
-        imf.show_napari(viewer, all_scenes_array, metadata,
+        nap.show_napari(viewer, all_scenes_array, metadata,
                         blending='additive',
+                        adjust_contrast=do_scaling,
                         gamma=0.85,
                         add_mdtable=False,
                         rename_sliders=True)
@@ -544,7 +498,7 @@ if __name__ == "__main__":
         # create the widget elements to be added to the napari viewer
 
         # table for the metadata and for options
-        mdbrowser = TableWidget()
+        mdbrowser = nap.TableWidget()
         checkboxes = OptionsWidget()
 
         # widget to start an experiment in ZEN remotely

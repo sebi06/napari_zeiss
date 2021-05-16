@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 
 #################################################################
-# File        : czifile_tools.py
-# Version     : 0.1.0
+# File        : fileutils.py
+# Version     : 0.1.2
 # Author      : czsrh
-# Date        : 17.02.2021
+# Date        : 16.04.2021
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Copyright (c) 2021 Carl Zeiss AG, Germany. All Rights Reserved.
@@ -14,7 +14,7 @@ import os
 from aicsimageio import AICSImage, imread, imread_dask
 import aicspylibczi
 from numpy.core.fromnumeric import _size_dispatcher
-import imgfile_tools as imf
+import czifiletools.imgfile_tools as imf
 import itertools as it
 from tqdm import tqdm, trange
 from tqdm.contrib.itertools import product
@@ -24,10 +24,15 @@ from datetime import datetime
 import dateutil.parser as dt
 from lxml import etree
 import progressbar
+import zarr
 
 
 def define_czi_planetable():
+    """Define the columns for the dataframe containing the planetable for a CZI image
 
+    :return: empty dataframe with predefined columns
+    :rtype: pandas.DataFrame
+    """
     df = pd.DataFrame(columns=['Subblock',
                                'Scene',
                                'Tile',
@@ -224,6 +229,30 @@ def save_planetable(df, filename, separator=',', index=True):
     return csvfile
 
 
+def norm_columns(df, colname='Time [s]', mode='min'):
+    """Normalize a specific column inside a Pandas dataframe
+
+    :param df: DataFrame
+    :type df: pf.DataFrame
+    :param colname: Name of the coumn to be normalized, defaults to 'Time [s]'
+    :type colname: str, optional
+    :param mode: Mode of Normalization, defaults to 'min'
+    :type mode: str, optional
+    :return: Dataframe with normalized column
+    :rtype: pd.DataFrame
+    """
+    # normalize columns according to min or max value
+    if mode == 'min':
+        min_value = df[colname].min()
+        df[colname] = df[colname] - min_value
+
+    if mode == 'max':
+        max_value = df[colname].max()
+        df[colname] = df[colname] - max_value
+
+    return df
+
+
 def filterplanetable(planetable, S=0, T=0, Z=0, C=0):
 
     # filter planetable for specific scene
@@ -399,30 +428,67 @@ class CZIScene:
         self.index = sceneindex
         self.hasT = False
         self.hasZ = False
-        self.sizeT = None
-        self.sizeZ = None
-        self.sizeC = czi.dims_shape()[0]['C'][1]
+        self.hasS = False
+        #self.sizeT = None
+        #self.sizeZ = None
+        #self.sizeS = None
+        #self.sizeC = czi.dims_shape()[0]['C'][1]
+        #self.sizeS = czi.dims_shape()[0]['S'][1]
+        #self.sizeT = czi.dims_shape()[0]['T'][1]
+        #self.sizeZ = czi.dims_shape()[0]['Z'][1]
 
         # check if the scene has T or Z slices
         dims_aicspylibczi = czi.dims_shape()[0]
+
+        if 'C' in dims_aicspylibczi:
+            self.hasC = True
+            self.sizeC = czi.dims_shape()[0]['C'][1]
+        else:
+            self.hasS = False
+            self.sizeS = None
+
         if 'T' in dims_aicspylibczi:
             self.hasT = True
             self.sizeT = czi.dims_shape()[0]['T'][1]
+        else:
+            self.hasT = False
+            self.sizeT = None
 
         if 'Z' in dims_aicspylibczi:
             self.hasZ = True
             self.sizeZ = czi.dims_shape()[0]['Z'][1]
+        else:
+            self.hasZ = False
+            self.sizeZ = None
+
+        if 'S' in dims_aicspylibczi:
+            self.hasS = True
+            self.sizeS = czi.dims_shape()[0]['S'][1]
+        else:
+            self.hasS = False
+            self.sizeS = None
+
+        if 'M' in dims_aicspylibczi:
+            self.hasM = True
+            self.sizeM = czi.dims_shape()[0]['M'][1]
+        else:
+            self.hasM = False
+            self.sizeM = None
 
         # determine the shape of the scene
         shape_single_scene = [1]
+        single_scene_dimstr = 'S'
         posdict = {'S': 'SizeS', 'T': 'SizeT', 'C': 'SizeC', 'Z': 'SizeZ'}
 
         # find key based upon value
         for v in range(1, 4):
+
             # get the corresponding dim_id, e.g. 'S'
             dim_id = imf.get_key(md['dimpos_aics'], v)
+
             # get the correspong string to access the size of tht dimension
             dimstr = posdict[dim_id]
+
             # append size for this dimension to list containing the shape
             shape_single_scene.append(md[dimstr])
 
@@ -467,10 +533,17 @@ def get_shape_allscenes(czi, md):
     return array_size_all_scenes, shape_single_scenes, same_shape
 
 
-def read_czi_scene(czi, scene, metadata, scalefactor=1.0):
+def read_czi_scene(czi, scene, metadata, scalefactor=1.0, array_type='zarr'):
 
-    # create the required array for this scene
-    scene_array = np.empty(scene.shape_scene, dtype=metadata['NumPy.dtype'])
+    if array_type == 'numpy':
+        # create the required array for this scene as numoy array
+        scene_array = np.empty(scene.shape_scene, dtype=metadata['NumPy.dtype'])
+
+    if array_type == "zarr":
+        # create the required array for this scene as numoy array
+        scene_array = zarr.create(tuple(scene.shape_scene),
+                                  dtype=metadata['NumPy.dtype'],
+                                  chunks=True)
 
     # check if scalefactor has a reasonable value
     if scalefactor < 0.01 or scalefactor > 1.0:
@@ -505,10 +578,14 @@ def read_czi_scene(czi, scene, metadata, scalefactor=1.0):
             if scene.posT == 1:
                 if scene.posZ == 2:
                     # STZCYX
-                    scene_array[:, t, z, c, :, :] = scene_array_tzc
+                    #scene_array[:, t, z, c, :, :] = scene_array_tzc
+                    #scene_array[:, t, z, c, :, :] = scene_array_tzc[:, 0, 0]
+                    scene_array[0, t, z, c, :, :] = scene_array_tzc[0, 0, 0, :, :]
                 if scene.posZ == 3:
                     # STCZYX
-                    scene_array[:, t, c, z, :, :] = scene_array_tzc
+                    #scene_array[:, t, c, z, :, :] = scene_array_tzc
+                    #scene_array[:, t, c, z, :, :] = scene_array_tzc[:, 0, 0]
+                    scene_array[0, t, c, z, :, :] = scene_array_tzc[0, 0, 0, :, :]
 
     # in case no T and Z dimension are found
     if scene.hasT is False and scene.hasZ is False:
@@ -524,12 +601,57 @@ def read_czi_scene(czi, scene, metadata, scalefactor=1.0):
                                             C=c)
             if scene.posC == 1:
                 # SCTZYX
-                scene_array[:, c, 0, 0, :, :] = scene_array_c
+                #scene_array[:, c, 0, 0, :, :] = scene_array_c
+                scene_array[0, c, 0, 0, :, :] = scene_array_c[0, :, :]
             if scene.posC == 2:
                 # STCZYX
-                scene_array[:, 0, c, 0, :, :] = scene_array_c
+                #scene_array[:, 0, c, 0, :, :] = scene_array_c
+                scene_array[0, 0, c, 0, :, :] = scene_array_c[0, :, :]
             if scene.posC == 3:
                 # STZCYX
-                scene_array[:, 0, 0, c, :, :] = scene_array_c
+                #scene_array[:, 0, 0, c, :, :] = scene_array_c
+                scene_array[0, 0, 0, c, :, :] = scene_array_c[0, :, :]
+
+            # if scene.posC == 1:
+            #    # SCTZYX
+            #    scene_array[:, c, 0:1, 0:1, ...] = scene_array_c
+            # if scene.posC == 2:
+            #    # STCZYX
+            #    scene_array[:, 0:1, c, 0:1, ...] = scene_array_c
+            # if scene.posC == 3:
+            #    # STZCYX
+            #    scene_array[:, 0:1, 0:1, c, ...] = scene_array_c
+
+    if scene.hasT is False and scene.hasZ is True:
+
+        # create an array for the scene
+        for z, c in it.product(range(scene.sizeZ),
+                               range(scene.sizeC)):
+
+            scene_array_zc = czi.read_mosaic(region=(scene.xstart,
+                                                     scene.ystart,
+                                                     scene.width,
+                                                     scene.height),
+                                             scale_factor=scalefactor,
+                                             Z=z,
+                                             C=c)
+
+            if scene.posC == 1:
+                if scene.posZ == 2:
+                    # SCTZYX
+                    scene_array[0, c, 0, 0, :, :] = scene_array_zc[0, 0, :, :]
+
+            if scene.posC == 2:
+                if scene.posZ == 1:
+                    # SZCTYX
+                    scene_array[0, z, c, 0, :, :] = scene_array_zc[0, 0, :, :]
+                if scene.posZ == 3:
+                    # STCZYX
+                    scene_array[0, 0, c, z, :, :] = scene_array_zc[0, 0, :, :]
+
+            if scene.posC == 3:
+                if scene.posZ == 2:
+                    # STZCYX
+                    scene_array[0, 0, z, c, :, :] = scene_array_zc[0, 0, :, :]
 
     return scene_array
