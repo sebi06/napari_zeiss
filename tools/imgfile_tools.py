@@ -2,9 +2,9 @@
 
 #################################################################
 # File        : imgfile_tools.py
-# Version     : 1.6.2
+# Version     : 1.7.0
 # Author      : czsrh
-# Date        : 21.03.2021
+# Date        : 16.05.2021
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Disclaimer: This tool is purely experimental. Feel free to
