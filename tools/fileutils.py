@@ -14,7 +14,7 @@ import os
 from aicsimageio import AICSImage, imread, imread_dask
 import aicspylibczi
 from numpy.core.fromnumeric import _size_dispatcher
-import czifiletools.imgfile_tools as imf
+import tools.imgfile_tools as imf
 import itertools as it
 from tqdm import tqdm, trange
 from tqdm.contrib.itertools import product
