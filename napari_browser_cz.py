@@ -300,41 +300,51 @@ def open_image_stack(filepath):
             use_aicsimageio = True
         elif metadata['ImageType'] == 'czi' and metadata['czi_isMosaic'] is True:
             use_aicsimageio = False
+            use_pylibczi = True
 
         # check if CZI has T or Z dimension
         hasT = False
         hasZ = False
+
         if 'T' in metadata['dims_aicspylibczi']:
             hasT = True
         if 'Z' in metadata['dims_aicspylibczi']:
             hasZ = True
 
-        # read CZI using aicspylibczi
-        czi = CziFile(filepath)
-
-        # get the required shape for all and single scenes
-        shape_all, shape_single, same_shape = czt.get_shape_allscenes(czi, metadata)
-        print('Required_Array Shape for all scenes: ', shape_all)
-        for sh in shape_single:
-            print('Required Array Shape for single scenes: ', sh)
-
-        if not same_shape:
-            print('No all scenes have the same shape. Exiting ...')
-            sys.exit()
-
         if use_aicsimageio:
             # get AICSImageIO object
             img = AICSImage(filepath)
 
-        # check if the Dask Delayed Reader should be used
-        if not checkboxes.cbox_dask.isChecked():
-            print('Using AICSImageIO normal ImageReader.')
-            all_scenes_array = img.get_image_data()
-        if checkboxes.cbox_dask.isChecked():
-            print('Using AICSImageIO Dask Delayed ImageReader')
-            all_scenes_array = img.get_image_dask_data()
+            # check if the Dask Delayed Reader should be used
+            if not checkboxes.cbox_dask.isChecked():
+                print('Using AICSImageIO normal ImageReader.')
+                all_scenes_array = img.get_image_data()
+            if checkboxes.cbox_dask.isChecked():
+                print('Using AICSImageIO Dask Delayed ImageReader')
+                all_scenes_array = img.get_image_dask_data()
 
         if not use_aicsimageio and use_pylibczi is True:
+
+            # read CZI using aicspylibczi
+            czi = CziFile(filepath)
+
+            # Get the shape of the data
+            print('Dimensions   : ', czi.dims)
+            print('Size         : ', czi.size)
+            print('Shape        : ', czi.dims_shape())
+            print('IsMoasic     : ', czi.is_mosaic())
+            if czi.is_mosaic():
+                print('Mosaic Size  : ', czi.read_mosaic_size())
+
+            # get the required shape for all and single scenes
+            shape_all, shape_single, same_shape = czt.get_shape_allscenes(czi, metadata)
+            print('Required_Array Shape for all scenes: ', shape_all)
+            for sh in shape_single:
+                print('Required Array Shape for single scenes: ', sh)
+
+            if not same_shape:
+                print('No all scenes have the same shape. Exiting ...')
+                sys.exit()
 
             #array_type = 'dask'
             array_type = 'zarr'
@@ -344,9 +354,17 @@ def open_image_stack(filepath):
 
                 # define array to store all channels
                 print('Using aicspylibCZI to read the image (ZARR array).')
+
+                # option 1
                 all_scenes_array = zarr.create(tuple(shape_all),
                                                dtype=metadata['NumPy.dtype'],
                                                chunks=True)
+
+                # option 2
+                # all_scenes_array = zarr.open(r'c:\Temp\czi_scene_all.zarr', mode='w',
+                #                            shape=shape_all,
+                #                            chunks=True,
+                #                            dtype=md['NumPy.dtype'])
 
             if array_type == 'numpy':
                 print('Using aicspylibCZI to read the image (Numpy.Array).')

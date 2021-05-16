@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 import xmltodict
 import numpy as np
-import czifiletools.fileutils as czt
+import tools.fileutils as czt
 from collections import Counter
 from lxml import etree as ET
 import sys

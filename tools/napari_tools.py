@@ -181,7 +181,8 @@ def show_napari(viewer, array, metadata,
         print('Scaling Factors :', scalefactors_ch)
 
         if adjust_contrast:
-            sc = calc_scaling(channel)
+            sc = calc_scaling(channel, corr_max=1.15)
+            print('Display Scaling', sc)
 
             # add channel to napari viewer
             new_layer = viewer.add_image(channel,
