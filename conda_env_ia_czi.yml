@@ -36,7 +36,15 @@ dependencies:
   - progressbar2
   - imagecodecs
   - pip:
-      - -r file:requirements.txt
+      #- -r file:requirements.txt
+      - napari[all]==0.4.7
+      - aicsimageio[all]>=3.3.4,<4
+      - aicspylibczi>=2.8.0,<4
+      - magicgui>=0.2.9, <1
+      - mightymosaic>=1.2.3,<2
+      - czifile>=2019.7.2
+      - apeer-dev-kit>=1.2.2,<2
+      - apeer-ometiff-library>=1.7.2,<2
 # Create an environmemt
 # conda env create --file conda_env_ia_czi.yml
 
