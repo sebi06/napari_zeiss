@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 
 #################################################################
-# File        : imgfile_tools.py
-# Version     : 1.7.0
+# File        : czifile_tools.py
+# Version     : 0.0.2
 # Author      : czsrh
-# Date        : 16.05.2021
+# Date        : 09.06.2021
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Disclaimer: This tool is purely experimental. Feel free to
@@ -13,59 +13,22 @@
 # Copyright (c) 2021 Carl Zeiss AG, Germany. All Rights Reserved.
 #################################################################
 
-
-import czifile as zis
-from apeer_ometiff_library import omexmlClass
 import os
+import sys
 from pathlib import Path
 import xmltodict
-import numpy as np
-#import tools.fileutils as czt
 from collections import Counter
-from lxml import etree as ET
-import sys
-#from aicsimageio import AICSImage, imread, imread_dask
-#from aicsimageio.writers import ome_tiff_writer
+import xml.etree.ElementTree as ET
 from aicspylibczi import CziFile
-import dask.array as da
-import pandas as pd
-import tifffile
 import pydash
 import zarr
-
-
-def get_imgtype(imagefile):
-    """Returns the type of the image based on the file extension - no magic
-
-    :param imagefile: filename of the image
-    :type imagefile: str
-    :return: string specifying the image type
-    :rtype: str
-    """
-
-    imgtype = None
-
-    if imagefile.lower().endswith('.ome.tiff') or imagefile.lower().endswith('.ome.tif'):
-        # it is on OME-TIFF based on the file extension ... :-)
-        imgtype = 'ometiff'
-
-    elif imagefile.lower().endswith('.tiff') or imagefile.lower().endswith('.tif'):
-        # it is on OME-TIFF based on the file extension ... :-)
-        imgtype = 'tiff'
-
-    elif imagefile.lower().endswith('.czi'):
-        # it is on CZI based on the file extension ... :-)
-        imgtype = 'czi'
-
-    elif imagefile.lower().endswith('.png'):
-        # it is on CZI based on the file extension ... :-)
-        imgtype = 'png'
-
-    elif imagefile.lower().endswith('.jpg') or imagefile.lower().endswith('.jpeg'):
-        # it is on OME-TIFF based on the file extension ... :-)
-        imgtype = 'jpg'
-
-    return imgtype
+import itertools as it
+from tqdm.contrib.itertools import product
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import dateutil.parser as dt
+from lxml import etree
 
 
 def create_metadata_dict():
@@ -80,7 +43,6 @@ def create_metadata_dict():
                 'Extension': None,
                 'ImageType': None,
                 'AcqDate': None,
-                'TotalSeries': None,
                 'SizeX': None,
                 'SizeY': None,
                 'SizeZ': 1,
@@ -89,13 +51,11 @@ def create_metadata_dict():
                 'SizeS': 1,
                 'SizeB': 1,
                 'SizeM': 1,
-                'Sizes BF': None,
-                'DimOrder BF': None,
-                'DimOrder BF Array': None,
-                'axes_czifile': None,
-                'shape_czifile': None,
-                'czi_isRGB': False,
-                'czi_isMosaic': False,
+                'isRGB': False,
+                'isMosaic': False,
+                'czi_size': None,
+                'czi_dims': None,
+                'czi_dims_shape': None,
                 'ObjNA': [],
                 'ObjMag': [],
                 'ObjID': [],
@@ -118,182 +78,11 @@ def create_metadata_dict():
                 'ChannelNames': [],
                 'ChannelColors': [],
                 'ImageIDs': [],
-                'NumPy.dtype': None
+                'bbox_all_scenes': None,
+                'bbox_all_mosaic_scenes': None,
+                'bbox_all_mosaic_tiles': None,
+                'bbox_all_tiles': None
                 }
-
-    return metadata
-
-
-def get_metadata(imagefile,
-                 omeseries=0,
-                 round_values=False):
-    """Returns a dictionary with metadata depending on the image type.
-    Only CZI and OME-TIFF are currently supported.
-
-    :param imagefile: filename of the image
-    :type imagefile: str
-    :param omeseries: series of OME-TIFF file, , defaults to 0
-    :type omeseries: int, optional
-    :param round_values: option to round some values, defaults to TrueFalse
-    :type round_values: bool, optional
-    :return: metadata - dict with the metainformation
-    :rtype: dict
-    :return: additional_mdczi - dict with additional the metainformation for CZI only
-    :rtype: dict
-    """
-
-    # get the image type
-    imgtype = get_imgtype(imagefile)
-    print('Detected Image Type (based on extension):', imgtype)
-
-    md = {}
-    additional_md = {}
-
-    if imgtype == 'ometiff':
-
-        # parse the OME-XML and return the metadata dictionary and additional info
-        md = get_metadata_ometiff(imagefile, series=omeseries)
-
-    elif imgtype == 'czi':
-
-        # parse the CZI metadata return the metadata dictionary and additional info
-        md = get_metadata_czi(imagefile, dim2none=False)
-        additional_md = get_additional_metadata_czi(imagefile)
-
-    # TODO - Remove this when issue is fixed
-    if round_values:
-        # temporary workaround for slider / floating point issue in Napari viewer
-        # https://forum.image.sc/t/problem-with-dimension-slider-when-adding-array-as-new-layer-for-ome-tiff/39092/2?u=sebi06
-
-        md['XScale'] = np.round(md['XScale'], 3)
-        md['YScale'] = np.round(md['YScale'], 3)
-        md['ZScale'] = np.round(md['ZScale'], 3)
-    else:
-        # no metadate will be returned
-        print('Scales will not be rounded.')
-
-    return md, additional_md
-
-
-def get_metadata_ometiff(filename, series=0):
-    """Returns a dictionary with OME-TIFF metadata.
-
-    :param filename: filename of the OME-TIFF image
-    :type filename: str
-    :param series: Image Series, defaults to 0
-    :type series: int, optional
-    :return: dictionary with the relevant OME-TIFF metainformation
-    :rtype: dict
-    """
-
-    with tifffile.TiffFile(filename) as tif:
-        try:
-            # get OME-XML metadata as string the old way
-            omexml_string = tif[0].image_description.decode('utf-8')
-        except TypeError as e:
-            print('TypeError :', e)
-            omexml_string = tif.ome_metadata
-
-    # get the OME-XML using the apeer-ometiff-library
-    omemd = omexmlClass.OMEXML(omexml_string)
-
-    # create dictionary for metadata and get OME-XML data
-    metadata = create_metadata_dict()
-
-    # get directory and filename etc.
-    metadata['Directory'] = os.path.dirname(filename)
-    metadata['Filename'] = os.path.basename(filename)
-    metadata['Extension'] = 'ome.tiff'
-    metadata['ImageType'] = 'ometiff'
-    metadata['AcqDate'] = omemd.image(series).AcquisitionDate
-    metadata['Name'] = omemd.image(series).Name
-
-    # get image dimensions TZCXY
-    metadata['SizeT'] = omemd.image(series).Pixels.SizeT
-    metadata['SizeZ'] = omemd.image(series).Pixels.SizeZ
-    metadata['SizeC'] = omemd.image(series).Pixels.SizeC
-    metadata['SizeX'] = omemd.image(series).Pixels.SizeX
-    metadata['SizeY'] = omemd.image(series).Pixels.SizeY
-
-    # get number of image series
-    metadata['TotalSeries'] = omemd.get_image_count()
-    metadata['Sizes BF'] = [metadata['TotalSeries'],
-                            metadata['SizeT'],
-                            metadata['SizeZ'],
-                            metadata['SizeC'],
-                            metadata['SizeY'],
-                            metadata['SizeX']]
-
-    # get dimension order
-    metadata['DimOrder BF'] = omemd.image(series).Pixels.DimensionOrder
-
-    # reverse the order to reflect later the array shape
-    metadata['DimOrder BF Array'] = metadata['DimOrder BF'][::-1]
-
-    # get the scaling
-    metadata['XScale'] = omemd.image(series).Pixels.PhysicalSizeX
-    metadata['XScale'] = np.round(metadata['XScale'], 3)
-    # metadata['XScaleUnit'] = omemd.image(series).Pixels.PhysicalSizeXUnit
-    metadata['YScale'] = omemd.image(series).Pixels.PhysicalSizeY
-    metadata['YScale'] = np.round(metadata['YScale'], 3)
-    # metadata['YScaleUnit'] = omemd.image(series).Pixels.PhysicalSizeYUnit
-    metadata['ZScale'] = omemd.image(series).Pixels.PhysicalSizeZ
-    metadata['ZScale'] = np.round(metadata['ZScale'], 3)
-    # metadata['ZScaleUnit'] = omemd.image(series).Pixels.PhysicalSizeZUnit
-
-    # get all image IDs
-    for i in range(omemd.get_image_count()):
-        metadata['ImageIDs'].append(i)
-
-    # get information about the instrument and objective
-    try:
-        metadata['InstrumentID'] = omemd.instrument(series).get_ID()
-    except (KeyError, AttributeError) as e:
-        print('Key not found:', e)
-        metadata['InstrumentID'] = None
-
-    try:
-        metadata['DetectorModel'] = omemd.instrument(series).Detector.get_Model()
-        metadata['DetectorID'] = omemd.instrument(series).Detector.get_ID()
-        metadata['DetectorModel'] = omemd.instrument(series).Detector.get_Type()
-    except (KeyError, AttributeError) as e:
-        print('Key not found:', e)
-        metadata['DetectorModel'] = None
-        metadata['DetectorID'] = None
-        metadata['DetectorModel'] = None
-
-    try:
-        metadata['ObjNA'] = omemd.instrument(series).Objective.get_LensNA()
-        metadata['ObjID'] = omemd.instrument(series).Objective.get_ID()
-        metadata['ObjMag'] = omemd.instrument(series).Objective.get_NominalMagnification()
-    except (KeyError, AttributeError) as e:
-        print('Key not found:', e)
-        metadata['ObjNA'] = None
-        metadata['ObjID'] = None
-        metadata['ObjMag'] = None
-
-    # get channel names
-    for c in range(metadata['SizeC']):
-        metadata['Channels'].append(omemd.image(series).Pixels.Channel(c).Name)
-
-    # add axes and shape information using aicsimageio package
-    ometiff_aics = AICSImage(filename)
-    metadata['Axes_aics'] = ometiff_aics.dims
-    metadata['Shape_aics'] = ometiff_aics.shape
-    metadata['SizeX_aics'] = ometiff_aics.size_x
-    metadata['SizeY_aics'] = ometiff_aics.size_y
-    metadata['SizeC_aics'] = ometiff_aics.size_c
-    metadata['SizeZ_aics'] = ometiff_aics.size_t
-    metadata['SizeT_aics'] = ometiff_aics.size_t
-    metadata['SizeS_aics'] = ometiff_aics.size_s
-
-    # close AICSImage object
-    ometiff_aics.close()
-
-    # check for None inside Scaling to avoid issues later one ...
-    metadata = checkmdscale_none(metadata,
-                                 tocheck=['XScale', 'YScale', 'ZScale'],
-                                 replace=[1.0, 1.0, 1.0])
 
     return metadata
 
@@ -352,18 +141,16 @@ def get_metadata_czi(filename, dim2none=False,
     :type forceDimvalue: int, optional
     :param convert_scunit: convert scale unit string from 'µm' to 'micron', defaults to False
     :type convert_scunit: bool, optional
-    :return: metadata - dictionary with the relevant CZI metainformation
+    :return: metadata, metadata_add - dictionaries with the relevant CZI metainformation
     :rtype: dict
     """
 
-    # get CZI object
-    czi = zis.CziFile(filename)
-
-    # parse the XML into a dictionary
-    metadatadict_czi = czi.metadata(raw=False)
+    # get metadata dictionary using aicspylibczi
+    czi = CziFile(filename)
+    xmlstr = ET.tostring(czi.meta)
+    metadatadict_czi = xmltodict.parse(xmlstr)
 
     # initialize metadata dictionary
-    #metadata = {}
     metadata = create_metadata_dict()
 
     # get directory and filename etc.
@@ -372,57 +159,25 @@ def get_metadata_czi(filename, dim2none=False,
     metadata['Extension'] = 'czi'
     metadata['ImageType'] = 'czi'
 
-    # add axes and shape information using czifile package
-    metadata['axes_czifile'] = czi.axes
-    metadata['shape_czifile'] = czi.shape
-
-    # add axes and shape information using aicsimageio package
-    czi_aics = AICSImage(filename)
-    metadata['Axes_aics'] = czi_aics.dims
-    try:
-        metadata['Shape_aics'] = czi_aics.shape
-        metadata['SizeX_aics'] = czi_aics.size_x
-        metadata['SizeY_aics'] = czi_aics.size_y
-        metadata['SizeC_aics'] = czi_aics.size_c
-        metadata['SizeZ_aics'] = czi_aics.size_t
-        metadata['SizeT_aics'] = czi_aics.size_t
-        metadata['SizeS_aics'] = czi_aics.size_s
-    except KeyError as e:
-        print('AICSImageIO could not detect dimension :', e)
-        metadata['Shape_aics'] = None
-        metadata['SizeX_aics'] = None
-        metadata['SizeY_aics'] = None
-        metadata['SizeC_aics'] = None
-        metadata['SizeZ_aics'] = None
-        metadata['SizeT_aics'] = None
-        metadata['SizeS_aics'] = None
-
     # get additional data by using pylibczi directly
-    # Get the shape of the data, the coordinate pairs are (start index, size)
-    aics_czi = CziFile(filename)
-    metadata['dims_aicspylibczi'] = aics_czi.dims_shape()[0]
-    metadata['axes_aicspylibczi'] = aics_czi.dims
-    metadata['size_aicspylibczi'] = aics_czi.size
-    metadata['czi_isMosaic'] = aics_czi.is_mosaic()
-    print('CZI is Mosaic :', metadata['czi_isMosaic'])
+    metadata['czi_dims'] = czi.dims
+    metadata['czi_dims_shape'] = czi.get_dims_shape()
+    metadata['czi_size'] = czi.size
+    metadata['isMosaic'] = czi.is_mosaic()
+    print('CZI is Mosaic :', metadata['isMosaic'])
 
-    # get positions of dimensions
-    try:
-        metadata['dimpos_aics'] = get_dimpositions(metadata['Axes_aics'])
-    except KeyError:
-        metadata['dimpos_aics'] = None
+    metadata = checkdims_czi(czi, metadata)
 
+    # determine pixel type for CZI array using aicspylibczi
+    metadata['Pixeltype_aics'] = czi.pixel_type
     # determine pixel type for CZI array
-    metadata['NumPy.dtype'] = czi.dtype
+    metadata['NumPy.dtype'] = get_dtype_fromstring(czi.pixel_type)
 
-    # check if the CZI image is an RGB image depending
-    # on the last dimension entry of axes
-    if czi.shape[-1] == 3:
-        metadata['czi_isRGB'] = True
-    if czi.shape[-1] != 3:
-        metadata['czi_isRGB'] = False
-    print('CZI is RGB :', metadata['czi_isRGB'])
+    if 'A' in czi.dims:
+        metadata['isRGB'] = True
+    print('CZI is RGB :', metadata['isRGB'])
 
+    # determine pixel type for CZI array by reading XML metadata
     try:
         metadata['PixelType'] = metadatadict_czi['ImageDocument']['Metadata']['Information']['Image']['PixelType']
     except KeyError as e:
@@ -473,7 +228,7 @@ def get_metadata_czi(filename, dim2none=False,
         # get name for dye
         try:
             channels.append(metadatadict_czi['ImageDocument']['Metadata']['DisplaySetting']
-                                            ['Channels']['Channel']['ShortName'])
+                            ['Channels']['Channel']['ShortName'])
         except KeyError as e:
             print('Channel shortname not found :', e)
             try:
@@ -488,8 +243,12 @@ def get_metadata_czi(filename, dim2none=False,
             channels_names.append(metadatadict_czi['ImageDocument']['Metadata']['DisplaySetting']
                                   ['Channels']['Channel']['Name'])
         except KeyError as e:
-            print('Channel name found :', e)
-            channels_names.append['CH1']
+            try:
+                channels_names.append(metadatadict_czi['ImageDocument']['Metadata']['DisplaySetting']
+                                      ['Channels']['Channel']['@Name'])
+            except KeyError as e:
+                print('Channel name found :', e)
+                channels_names.append('CH1')
 
         # get channel color
         try:
@@ -521,8 +280,12 @@ def get_metadata_czi(filename, dim2none=False,
                 channels_names.append(metadatadict_czi['ImageDocument']['Metadata']['DisplaySetting']
                                       ['Channels']['Channel'][ch]['Name'])
             except KeyError as e:
-                print('Channel name not found :', e)
-                channels_names.append('CH' + str(ch))
+                try:
+                    channels_names.append(metadatadict_czi['ImageDocument']['Metadata']['DisplaySetting']
+                                          ['Channels']['Channel'][ch]['@Name'])
+                except KeyError as e:
+                    print('Channel name not found :', e)
+                    channels_names.append('CH' + str(ch))
 
             # get channel colors
             try:
@@ -617,7 +380,7 @@ def get_metadata_czi(filename, dim2none=False,
     except (KeyError, TypeError) as e:
         print('Error extracting XY Scale  :', e)
 
-    # get the XY scaling information
+    # get the Z scaling information
     try:
         metadata['ZScale'] = float(metadatadict_czi['ImageDocument']['Metadata']['Scaling']['Items']['Distance'][2]['Value']) * 1000000
         metadata['ZScale'] = np.round(metadata['ZScale'], 3)
@@ -895,14 +658,20 @@ def get_metadata_czi(filename, dim2none=False,
                 try:
                     metadata['Well_Indices'].append(allscenes['Index'])
                 except KeyError as e:
-                    print('Well Index not found :', e)
-                    metadata['Well_Indices'].append(1)
+                    try:
+                        metadata['Well_Indices'].append(allscenes['@Index'])
+                    except KeyError as e:
+                        print('Well Index not found :', e)
+                        metadata['Well_Indices'].append(1)
 
                 try:
                     metadata['Well_PositionNames'].append(allscenes['Name'])
                 except KeyError as e:
-                    print('Well Position Names not found :', e)
-                    metadata['Well_PositionNames'].append('P1')
+                    try:
+                        metadata['Well_PositionNames'].append(allscenes['@Name'])
+                    except KeyError as e:
+                        print('Well Position Names not found :', e)
+                        metadata['Well_PositionNames'].append('P1')
 
                 try:
                     metadata['Well_ColId'].append(np.int(allscenes['Shape']['ColumnIndex']))
@@ -949,13 +718,19 @@ def get_metadata_czi(filename, dim2none=False,
                 try:
                     metadata['Well_Indices'].append(well['Index'])
                 except KeyError as e:
-                    print('Well Index not found :', e)
-                    metadata['Well_Indices'].append(None)
+                    try:
+                        metadata['Well_Indices'].append(well['@Index'])
+                    except KeyError as e:
+                        print('Well Index not found :', e)
+                        metadata['Well_Indices'].append(None)
                 try:
                     metadata['Well_PositionNames'].append(well['Name'])
                 except KeyError as e:
-                    print('Well Position Names not found :', e)
-                    metadata['Well_PositionNames'].append(None)
+                    try:
+                        metadata['Well_PositionNames'].append(well['@Name'])
+                    except KeyError as e:
+                        print('Well Position Names not found :', e)
+                        metadata['Well_PositionNames'].append(None)
 
                 try:
                     metadata['Well_ColId'].append(np.int(well['Shape']['ColumnIndex']))
@@ -995,35 +770,30 @@ def get_metadata_czi(filename, dim2none=False,
         print('No valid Scene or Well information found:', e)
 
     # get the dimensions of the bounding boxes for the scenes
-    # acces CZI image using aicslibczi
-    cziobject = CziFile(filename)
-    metadata['BBoxes_Scenes'] = czt.getbboxes_allscenes(cziobject, metadata,
-                                                        numscenes=metadata['SizeS'])
+    #metadata['BBoxes_Scenes'] = getbboxes_allscenes(czi, metadata, numscenes=metadata['SizeS'])
 
-    # close CZI file
-    czi.close()
+    metadata['bbox_all_scenes'] = czi.get_all_scene_bounding_boxes()
+    if czi.is_mosaic():
+        metadata['bbox_all_mosaic_scenes'] = czi.get_all_mosaic_scene_bounding_boxes()
+        metadata['bbox_all_mosaic_tiles'] = czi.get_all_mosaic_tile_bounding_boxes()
+        metadata['bbox_all_tiles'] = czi.get_all_tile_bounding_boxes()
 
-    # close AICSImage object
-    czi_aics.close()
+    # get additional meta data about the experiment etc.
+    metadata_add = get_additional_metadata_czi(metadatadict_czi)
 
-    return metadata
+    return metadata, metadata_add
 
 
-def get_additional_metadata_czi(filename):
+def get_additional_metadata_czi(metadatadict_czi):
     """
     Returns a dictionary with additional CZI metadata.
 
-    :param filename: filename of the CZI image
-    :type filename: str
-    :return: additional_czimd - dictionary with additional CZI metainformation
+    :param metadatadict_czi: complete metadata dictionary of the CZI image
+    :type metadatadict_czi: dict
+    :return: additional_czimd - dictionary with additional CZI metadata
     :rtype: dict
     """
 
-    # get CZI object and read array
-    czi = zis.CziFile(filename)
-
-    # parse the XML into a dictionary
-    metadatadict_czi = xmltodict.parse(czi.metadata())
     additional_czimd = {}
 
     try:
@@ -1055,9 +825,6 @@ def get_additional_metadata_czi(filename):
     except KeyError as e:
         print('Key not found :', e)
         additional_czimd['Layers'] = None
-
-    # close CZI file
-    czi.close()
 
     return additional_czimd
 
@@ -1248,117 +1015,6 @@ def addzeros(number):
     return zerostring
 
 
-def write_ometiff_aicsimageio(savepath, imgarray, metadata,
-                              reader='aicsimageio',
-                              overwrite=False):
-    """Write an OME-TIFF file from an image array based on the metadata.
-
-    :param filepath: savepath of the OME-TIFF stack
-    :type filepath: str
-    :param imgarray: multi-dimensional image array
-    :type imgarray: NumPy.Array
-    :param metadata: metadata dictionary with the required information
-    to create an correct OME-TIFF file
-    :type metadata: dict
-    :param reader: string (aicsimagio or czifile) specifying
-    the used reader, defaults to aicsimageio
-    :type metadata: str
-    :param overwrite: option to overwrite an existing OME-TIFF, defaults to False
-    :type overwrite: bool, optional
-    """
-
-    # define scaling from metadata or use defualt scaling
-    try:
-        pixels_physical_size = [metadata['XScale'],
-                                metadata['YScale'],
-                                metadata['ZScale']]
-    except KeyError as e:
-        print('Key not found:', e)
-        print('Use default scaling XYZ=1.0')
-        pixels_physical_size = [1.0, 1.0, 1.0]
-
-    # define channel names list from metadata
-    try:
-        channel_names = []
-        for ch in metadata['Channels']:
-            channel_names.append(ch)
-    except KeyError as e:
-        print('Key not found:', e)
-        channel_names = None
-
-    # get the dimensions and their position inside the dimension string
-    if reader == 'aicsimageio':
-
-        dims_dict, dimindex_list, numvalid_dims = get_dimorder(metadata['Axes_aics'])
-
-        # if the array has more than 5 dimensions then remove the S dimension
-        # because it is not supported by OME-TIFF
-        if len(imgarray.shape) > 5:
-            try:
-                imgarray = np.squeeze(imgarray, axis=dims_dict['S'])
-            except Exception:
-                print('Could not remover S Dimension from string.)')
-
-        # remove the S character from the dimension string
-        new_dimorder = metadata['Axes_aics'].replace('S', '')
-
-    if reader == 'czifile':
-
-        new_dimorder = metadata['Axes']
-        dims_dict, dimindex_list, numvalid_dims = get_dimorder(metadata['Axes'])
-        """
-        '0':'Sample',  # e.g. RGBA
-        'X':'Width',
-        'Y':'Height',
-        'C':'Channel',
-        'Z':'Slice',  # depth
-        'T':'Time',
-        'R':'Rotation',
-        'S':'Scene',  # contiguous regions of interest in a mosaic image
-        'I':'Illumination',  # direction
-        'B':'Block',  # acquisition
-        'M':'Mosaic',  # index of tile for compositing a scene
-        'H':'Phase',  # e.g. Airy detector fibers
-        'V':'View',  # e.g. for SPIM
-        """
-
-        to_remove = []
-
-        # list of unspupported dims for writing an OME-TIFF
-        dims = ['R', 'I', 'M', 'H', 'V', 'B', 'S', '0']
-
-        for dim in dims:
-            if dims_dict[dim] >= 0:
-                # remove the CZI DIMENSION character from the dimension string
-                new_dimorder = new_dimorder.replace(dim, '')
-                # add dimension index to the list of axis to be removed
-                to_remove.append(dims_dict[dim])
-                print('Remove Dimension:', dim)
-
-        # create tuple with dimensions to be removed
-        dims2remove = tuple(to_remove)
-        # remove dimensions from array
-        imgarray = np.squeeze(imgarray, axis=dims2remove)
-
-    # write the array as an OME-TIFF incl. the metadata
-    try:
-        with ome_tiff_writer.OmeTiffWriter(savepath, overwrite_file=overwrite) as writer:
-            writer.save(imgarray,
-                        channel_names=channel_names,
-                        ome_xml=None,
-                        image_name=os.path.basename((savepath)),
-                        pixels_physical_size=pixels_physical_size,
-                        channel_colors=None,
-                        dimension_order=new_dimorder)
-            writer.close()
-    except Exception as error:
-        print(error.__class__.__name__ + ": " + error.msg)
-        print('Could not write OME-TIFF')
-        savepath = None
-
-    return savepath
-
-
 def get_fname_woext(filepath):
     """Get the complete path of a file without the extension
     It alos will works for extensions like c:\myfile.abc.xyz
@@ -1381,76 +1037,6 @@ def get_fname_woext(filepath):
     filepath_woext = filepath.replace(real_extension, '')
 
     return filepath_woext
-
-
-def convert_to_ometiff(imagefilepath,
-                       bftoolsdir='/Users/bftools',
-                       czi_include_attachments=False,
-                       czi_autostitch=True,
-                       verbose=True):
-    """Convert image file using bfconvert tool into a OME-TIFF from with a python script.
-
-    :param imagefilepath: path to imagefile
-    :type imagefilepath: str
-    :param bftoolsdir: bftools directory containing the bfconvert, defaults to '/Users/bftools'
-    :type bftoolsdir: str, optional
-    :param czi_include_attachments: option convert a CZI attachment (if CZI), defaults to False
-    :type czi_include_attachments: bool, optional
-    :param czi_autostitch: option stich a CZI, defaults to True
-    :type czi_autostitch: bool, optional
-    :param verbose: show additional output, defaults to True
-    :type verbose: bool, optional
-    :return: fileparh of created OME-TIFF file
-    :rtype: str
-    """
-    # check if path exits
-    if not os.path.exists(bftoolsdir):
-        print('No bftools dirctory found. Nothing will be converted')
-        file_ometiff = None
-
-    if os.path.exists(bftoolsdir):
-
-        # set working dir
-        os.chdir(bftoolsdir)
-
-        # get the imagefile path without extension
-        imagefilepath_woext = get_fname_woext(imagefilepath)
-
-        # create imagefile path for OME-TIFF
-        file_ometiff = imagefilepath_woext + '.ome.tiff'
-
-        # create cmdstring for CZI files- mind the spaces !!!
-        if imagefilepath.lower().endswith('.czi'):
-
-            # configure the CZI options
-            if czi_include_attachments:
-                czi_att = 'true'
-            if not czi_include_attachments:
-                czi_att = 'false'
-
-            if czi_autostitch:
-                czi_stitch = 'true'
-            if not czi_autostitch:
-                czi_stitch = 'false'
-
-            # create cmdstring - mind the spaces !!!
-            cmdstring = 'bfconvert -no-upgrade -option zeissczi.attachments ' + czi_att + ' -option zeissczi.autostitch ' + \
-                czi_stitch + ' "' + imagefilepath + '" "' + file_ometiff + '"'
-
-        else:
-            # create cmdstring for non-CZIs- mind the spaces !!!
-            cmdstring = 'bfconvert -no-upgrade' + ' "' + imagefilepath + '" "' + file_ometiff + '"'
-
-        if verbose:
-            print('Original ImageFile :', imagefilepath_woext)
-            print('ImageFile OME.TIFF :', file_ometiff)
-            print('Use CMD :', cmdstring)
-
-        # run the bfconvert tool with the specified parameters
-        os.system(cmdstring)
-        print('Done.')
-
-    return file_ometiff
 
 
 def get_dimpositions(dimstring, tocheck=['B', 'S', 'T', 'Z', 'C']):
@@ -1476,7 +1062,7 @@ def update5dstack(image5d, image2d,
                   z=0,
                   c=0):
 
-    # remove XY
+    # remove XY dimenson string
     dimstring5d = dimstring5d.replace('X', '').replace('Y', '')
 
     if dimstring5d == 'TZC':
@@ -1538,3 +1124,730 @@ def expand_dims5d(array, metadata):
         array = np.expand_dims(array, axis=-5)
 
     return array
+
+
+def define_czi_planetable():
+    """Define the columns for the dataframe containing the planetable for a CZI image
+
+    :return: empty dataframe with predefined columns
+    :rtype: pandas.DataFrame
+    """
+    df = pd.DataFrame(columns=['Subblock',
+                               'Scene',
+                               'Tile',
+                               'T',
+                               'Z',
+                               'C',
+                               'X[micron]',
+                               'Y[micron]',
+                               'Z[micron]',
+                               'Time[s]',
+                               'xstart',
+                               'ystart',
+                               'xwidth',
+                               'ywidth'])
+
+    return df
+
+
+def get_czi_planetable(czifile):
+
+    # get the czi object using pylibczi
+    czi = aicspylibczi.CziFile(czifile)
+
+    # get the czi metadata
+    md, add = imf.get_metadata(czifile)
+
+    # initialize the plane table
+    df_czi = define_czi_planetable()
+
+    # define subblock counter
+    sbcount = -1
+
+    # create progressbar
+    # total = md['SizeS'] * md['SizeM'] * md['SizeT'] * md['SizeZ'] * md['SizeC']
+    # pbar = tqdm(total=total)
+
+    # pbar = progressbar.ProgressBar(max_value=total)
+    # in case the CZI has the M-Dimension
+    if md['czi_isMosaic']:
+
+        for s, m, t, z, c in product(range(md['SizeS']),
+                                     range(md['SizeM']),
+                                     range(md['SizeT']),
+                                     range(md['SizeZ']),
+                                     range(md['SizeC'])):
+
+            sbcount += 1
+            # print(s, m, t, z, c)
+            info = czi.read_subblock_rect(S=s, M=m, T=t, Z=z, C=c)
+
+            # read information from subblock
+            sb = czi.read_subblock_metadata(unified_xml=True,
+                                            B=0,
+                                            S=s,
+                                            M=m,
+                                            T=t,
+                                            Z=z,
+                                            C=c)
+
+            try:
+                time = sb.xpath('//AcquisitionTime')[0].text
+                timestamp = dt.parse(time).timestamp()
+            except IndexError as e:
+                timestamp = 0.0
+
+            try:
+                xpos = np.double(sb.xpath('//StageXPosition')[0].text)
+            except IndexError as e:
+                xpos = 0.0
+
+            try:
+                ypos = np.double(sb.xpath('//StageYPosition')[0].text)
+            except IndexError as e:
+                ypos = 0.0
+
+            try:
+                zpos = np.double(sb.xpath('//FocusPosition')[0].text)
+            except IndexError as e:
+                zpos = 0.0
+
+            df_czi = df_czi.append({'Subblock': sbcount,
+                                    'Scene': s,
+                                    'Tile': m,
+                                    'T': t,
+                                    'Z': z,
+                                    'C': c,
+                                    'X[micron]': xpos,
+                                    'Y[micron]': ypos,
+                                    'Z[micron]': zpos,
+                                    'Time[s]': timestamp,
+                                    'xstart': info[0],
+                                    'ystart': info[1],
+                                    'xwidth': info[2],
+                                    'ywidth': info[3]},
+                                   ignore_index=True)
+
+    if not md['czi_isMosaic']:
+
+        """
+        for s, t, z, c in it.product(range(md['SizeS']),
+                                     range(md['SizeT']),
+                                     range(md['SizeZ']),
+                                     range(md['SizeC'])):
+        """
+
+        for s, t, z, c in product(range(md['SizeS']),
+                                  range(md['SizeT']),
+                                  range(md['SizeZ']),
+                                  range(md['SizeC'])):
+
+            sbcount += 1
+            info = czi.read_subblock_rect(S=s, T=t, Z=z, C=c)
+
+            # read information from subblocks
+            sb = czi.read_subblock_metadata(unified_xml=True, B=0, S=s, T=t, Z=z, C=c)
+
+            try:
+                time = sb.xpath('//AcquisitionTime')[0].text
+                timestamp = dt.parse(time).timestamp()
+            except IndexError as e:
+                timestamp = 0.0
+
+            try:
+                xpos = np.double(sb.xpath('//StageXPosition')[0].text)
+            except IndexError as e:
+                xpos = 0.0
+
+            try:
+                ypos = np.double(sb.xpath('//StageYPosition')[0].text)
+            except IndexError as e:
+                ypos = 0.0
+
+            try:
+                zpos = np.double(sb.xpath('//FocusPosition')[0].text)
+            except IndexError as e:
+                zpos = 0.0
+
+            df_czi = df_czi.append({'Subblock': sbcount,
+                                    'Scene': s,
+                                    'Tile': 0,
+                                    'T': t,
+                                    'Z': z,
+                                    'C': c,
+                                    'X[micron]': xpos,
+                                    'Y[micron]': ypos,
+                                    'Z[micron]': zpos,
+                                    'Time[s]': timestamp,
+                                    'xstart': info[0],
+                                    'ystart': info[1],
+                                    'xwidth': info[2],
+                                    'ywidth': info[3]},
+                                   ignore_index=True)
+
+    # normalize timestamps
+    df_czi = imf.norm_columns(df_czi, colname='Time[s]', mode='min')
+
+    # cast data  types
+    df_czi = df_czi.astype({'Subblock': 'int32',
+                            'Scene': 'int32',
+                            'Tile': 'int32',
+                            'T': 'int32',
+                            'Z': 'int32',
+                            'C': 'int16',
+                            'xstart': 'int32',
+                            'xstart': 'int32',
+                            'ystart': 'int32',
+                            'xwidth': 'int32',
+                            'ywidth': 'int32'},
+                           copy=False,
+                           errors='ignore')
+
+    return df_czi
+
+
+def save_planetable(df, filename, separator=',', index=True):
+    """Save dataframe as CSV table
+
+    :param df: Dataframe to be saved as CSV.
+    :type df: pd.DataFrame
+    :param filename: filename of the CSV to be written
+    :type filename: str
+    :param separator: seperator for the CSV file, defaults to ','
+    :type separator: str, optional
+    :param index: option write the index into the CSV file, defaults to True
+    :type index: bool, optional
+    :return: filename of the csvfile that was written
+    :rtype: str
+    """
+    csvfile = os.path.splitext(filename)[0] + '_planetable.csv'
+
+    # write the CSV data table
+    df.to_csv(csvfile, sep=separator, index=index)
+
+    return csvfile
+
+
+def norm_columns(df, colname='Time [s]', mode='min'):
+    """Normalize a specific column inside a Pandas dataframe
+
+    :param df: DataFrame
+    :type df: pf.DataFrame
+    :param colname: Name of the coumn to be normalized, defaults to 'Time [s]'
+    :type colname: str, optional
+    :param mode: Mode of Normalization, defaults to 'min'
+    :type mode: str, optional
+    :return: Dataframe with normalized column
+    :rtype: pd.DataFrame
+    """
+    # normalize columns according to min or max value
+    if mode == 'min':
+        min_value = df[colname].min()
+        df[colname] = df[colname] - min_value
+
+    if mode == 'max':
+        max_value = df[colname].max()
+        df[colname] = df[colname] - max_value
+
+    return df
+
+
+def filterplanetable(planetable, S=0, T=0, Z=0, C=0):
+
+    # filter planetable for specific scene
+    if S > planetable['Scene'].max():
+        print('Scene Index was invalid. Using Scene = 0.')
+        S = 0
+    pt = planetable[planetable['Scene'] == S]
+
+    # filter planetable for specific timepoint
+    if T > planetable['T'].max():
+        print('Time Index was invalid. Using T = 0.')
+        T = 0
+    pt = planetable[planetable['T'] == T]
+
+    # filter resulting planetable pt for a specific z-plane
+    try:
+        if Z > planetable['Z[micron]'].max():
+            print('Z-Plane Index was invalid. Using Z = 0.')
+            zplane = 0
+            pt = pt[pt['Z[micron]'] == Z]
+    except KeyError as e:
+        if Z > planetable['Z [micron]'].max():
+            print('Z-Plane Index was invalid. Using Z = 0.')
+            zplane = 0
+            pt = pt[pt['Z [micron]'] == Z]
+
+    # filter planetable for specific channel
+    if C > planetable['C'].max():
+        print('Channel Index was invalid. Using C = 0.')
+        C = 0
+    pt = planetable[planetable['C'] == C]
+
+    # return filtered planetable
+    return pt
+
+
+def get_bbox_scene(cziobject, sceneindex=0):
+    """Get the min / max extend of a given scene from a CZI mosaic image
+    at pyramid level = 0 (full resolution)
+
+    :param czi: CZI object for from aicspylibczi
+    :type czi: Zeiss CZI file object
+    :param sceneindex: index of the scene, defaults to 0
+    :type sceneindex: int, optional
+    :return: tuple with (XSTART, YSTART, WIDTH, HEIGHT) extend in pixels
+    :rtype: tuple
+    """
+
+    # get all bounding boxes
+    bboxes = cziobject.mosaic_scene_bounding_boxes(index=sceneindex)
+
+    # initialize lists for required values
+    xstart = []
+    ystart = []
+    tilewidth = []
+    tileheight = []
+
+    # loop over all tiles for the specified scene
+    for box in bboxes:
+
+        # get xstart, ystart amd tile widths and heights
+        xstart.append(box[0])
+        ystart.append(box[1])
+        tilewidth.append(box[2])
+        tileheight.append(box[3])
+
+    # get bounding box for the current scene
+    XSTART = min(xstart)
+    YSTART = min(ystart)
+
+    # do not forget to add the width and height of the last tile :-)
+    WIDTH = max(xstart) - XSTART + tilewidth[-1]
+    HEIGHT = max(ystart) - YSTART + tileheight[-1]
+
+    return XSTART, YSTART, WIDTH, HEIGHT
+
+
+def read_scene_bbox(cziobject, metadata,
+                    sceneindex=0,
+                    channel=0,
+                    timepoint=0,
+                    zplane=0,
+                    scalefactor=1.0):
+    """Read a specific scene from a CZI image file.
+
+    : param cziobject: The CziFile reader object from aicspylibczi
+    : type cziobject: CziFile
+    : param metadata: Image metadata dictionary from imgfileutils
+    : type metadata: dict
+    : param sceneindex: Index of scene, defaults to 0
+    : type sceneindex: int, optional
+    : param channel: Index of channel, defaults to 0
+    : type channel: int, optional
+    : param timepoint: Index of Timepoint, defaults to 0
+    : type timepoint: int, optional
+    : param zplane: Index of z - plane, defaults to 0
+    : type zplane: int, optional
+    : param scalefactor: scaling factor to read CZI image pyramid, defaults to 1.0
+    : type scalefactor: float, optional
+    : return: scene as a numpy array
+    : rtype: NumPy.Array
+    """
+    # set variables
+    scene = None
+    hasT = False
+    hasZ = False
+
+    # check if scalefactor has a reasonable value
+    if scalefactor < 0.01 or scalefactor > 1.0:
+        print('Scalefactor too small or too large. Will use 1.0 as fallback')
+        scalefactor = 1.0
+
+    # check if CZI has T or Z dimension
+    if 'T' in metadata['dims_aicspylibczi']:
+        hasT = True
+    if 'Z' in metadata['dims_aicspylibczi']:
+        hasZ = True
+
+    # get the bounding box for the specified scene
+    xmin, ymin, width, height = get_bbox_scene(cziobject,
+                                               sceneindex=sceneindex)
+
+    # read the scene as numpy array using the correct function calls
+    if hasT is True and hasZ is True:
+        scene = cziobject.read_mosaic(region=(xmin, ymin, width, height),
+                                      scale_factor=scalefactor,
+                                      T=timepoint,
+                                      Z=zplane,
+                                      C=channel)
+
+    if hasT is True and hasZ is False:
+        scene = cziobject.read_mosaic(region=(xmin, ymin, width, height),
+                                      scale_factor=scalefactor,
+                                      T=timepoint,
+                                      C=channel)
+
+    if hasT is False and hasZ is True:
+        scene = cziobject.read_mosaic(region=(xmin, ymin, width, height),
+                                      scale_factor=scalefactor,
+                                      Z=zplane,
+                                      C=channel)
+
+    if hasT is False and hasZ is False:
+        scene = cziobject.read_mosaic(region=(xmin, ymin, width, height),
+                                      scale_factor=scalefactor,
+                                      C=channel)
+
+    # add new entries to metadata to adjust XY scale due to scaling factor
+    metadata['XScale Pyramid'] = metadata['XScale'] * 1 / scalefactor
+    metadata['YScale Pyramid'] = metadata['YScale'] * 1 / scalefactor
+
+    return scene, (xmin, ymin, width, height), metadata
+
+
+def getbboxes_allscenes(czi, md, numscenes=1):
+
+    all_bboxes = []
+    for s in range(numscenes):
+        sc = CZIScene(czi, md, sceneindex=s)
+        all_bboxes.append(sc)
+
+    return all_bboxes
+
+
+class CZIScene:
+    def __init__(self, czi, md, sceneindex):
+
+        if not md['isMosaic']:
+            self.bbox = czi.get_all_scene_bounding_boxes()[sceneindex]
+        if md['isMosaic']:
+            self.bbox = czi.get_mosaic_scene_bounding_box(index=sceneindex)
+
+        self.xstart = self.bbox.x
+        self.ystart = self.bbox.y
+        self.width = self.bbox.w
+        self.height = self.bbox.h
+        self.index = sceneindex
+        self.hasT = False
+        self.hasZ = False
+        self.hasS = False
+        self.hasM = False
+        self.hasH = False
+        self.hasB = False
+
+        if 'C' in czi.dims:
+            self.hasC = True
+            self.sizeC = czi.get_dims_shape()[0]['C'][1]
+        else:
+            self.hasC = False
+            self.sizeC = None
+
+        if 'T' in czi.dims:
+            self.hasT = True
+            self.sizeT = czi.get_dims_shape()[0]['T'][1]
+        else:
+            self.hasT = False
+            self.sizeT = None
+
+        if 'Z' in czi.dims:
+            self.hasZ = True
+            self.sizeZ = czi.get_dims_shape()[0]['Z'][1]
+        else:
+            self.hasZ = False
+            self.sizeZ = None
+
+        if 'S' in czi.dims:
+            self.hasS = True
+            self.sizeS = czi.get_dims_shape()[0]['S'][1]
+        else:
+            self.hasS = False
+            self.sizeS = None
+
+        if 'M' in czi.dims:
+            self.hasM = True
+            self.sizeM = czi.get_dims_shape()[0]['M'][1]
+        else:
+            self.hasM = False
+            self.sizeM = None
+
+        if 'B' in czi.dims:
+            self.hasB = True
+            self.sizeB = czi.get_dims_shape()[0]['B'][1]
+        else:
+            self.hasB = False
+            self.sizeB = None
+
+        if 'H' in czi.dims:
+            self.hasH = True
+            self.sizeH = czi.get_dims_shape()[0]['H'][1]
+        else:
+            self.hasH = False
+            self.sizeH = None
+
+        # determine the shape of the scene
+        self.shape_single_scene = []
+        #self.single_scene_dimstr = 'S'
+        self.single_scene_dimstr = ''
+
+        dims_to_ignore = ['H', 'M', 'A', 'Y', 'X']
+
+        # get the dimension identifier
+        for d in czi.dims:
+            if d not in dims_to_ignore:
+
+                if d == 'S':
+                    # set size of scene dimension to 1 because shape_single_scene
+                    dimsize = 1
+                else:
+                    # get the position inside string
+                    dimpos = czi.dims.index(d)
+                    dimsize = czi.size[dimpos]
+
+                # append
+                self.shape_single_scene.append(dimsize)
+                self.single_scene_dimstr = self.single_scene_dimstr + d
+
+        # add X and Y size to the shape and dimstring for the specific scene
+        self.shape_single_scene.append(self.height)
+        self.shape_single_scene.append(self.width)
+        self.single_scene_dimstr = self.single_scene_dimstr + 'YX'
+
+        # position for dimension for scene array
+        self.posC = self.single_scene_dimstr.index('C')
+        try:
+            self.posZ = self.single_scene_dimstr.index('Z')
+        except ValueError as e:
+            print('No Z-Dimension found.')
+            self.posZ = None
+
+        try:
+            self.posT = self.single_scene_dimstr.index('T')
+        except ValueError as e:
+            print('No T-Dimension found.')
+            self.posT = None
+
+
+def get_shape_allscenes(czi, md):
+
+    shape_single_scenes = []
+
+    # loop over all scenes
+    for s in range(md['SizeS']):
+
+        # get info for a single scene
+        single_scene = CZIScene(czi, md, s)
+
+        # add shape info to the list for shape of all single scenes
+        print('Adding shape for scene: ', s)
+        shape_single_scenes.append(single_scene.shape_single_scene)
+
+    # check if all calculated scene sizes have the same shape
+    same_shape = all(elem == shape_single_scenes[0] for elem in shape_single_scenes)
+
+    # create required array shape in case all scenes are equal
+    array_size_all_scenes = None
+    if same_shape:
+        array_size_all_scenes = shape_single_scenes[0].copy()
+        array_size_all_scenes[0] = md['SizeS']
+
+    return array_size_all_scenes, shape_single_scenes, same_shape
+
+
+def read_czi_scene(czi, scene, metadata,
+                   scalefactor=1.0,
+                   array_type='zarr'):
+
+    if array_type == 'numpy':
+        # create the required array for this scene as numoy array
+        scene_array = np.empty(scene.shape_single_scene,
+                               dtype=metadata['NumPy.dtype'])
+
+    if array_type == "zarr":
+        # create the required array for this scene as numoy array
+        scene_array = zarr.create(tuple(scene.shape_single_scene),
+                                  dtype=metadata['NumPy.dtype'],
+                                  chunks=True)
+
+    # check if scalefactor has a reasonable value
+    if scalefactor < 0.01 or scalefactor > 1.0:
+        print('Scalefactor too small or too large. Will use 1.0 as fallback')
+        scalefactor = 1.0
+
+    # read the scene as numpy array using the correct function calls
+    # unfortunately a CZI not always has all dimensions.
+
+    # in case T and Z dimension are found
+    if scene.hasT is True and scene.hasZ is True:
+
+        # create an array for the scene
+        for t, z, c in it.product(range(scene.sizeT),
+                                  range(scene.sizeZ),
+                                  range(scene.sizeC)):
+
+            scene_array_tzc = czi.read_mosaic(region=(scene.xstart,
+                                                      scene.ystart,
+                                                      scene.width,
+                                                      scene.height),
+                                              scale_factor=scalefactor,
+                                              T=t,
+                                              Z=z,
+                                              C=c)
+
+            index_list = [0] * (len(scene_array.shape) - 2)
+            index_list[scene.posC] = c
+            index_list[scene.posZ] = z
+            index_list[scene.posT] = t
+            scene_array[tuple(index_list)] = scene_array_tzc[0, 0, 0, :, :]
+
+            # if scene.posT == 1:
+            #     if scene.posZ == 2:
+            #         # STZCYX
+            #         #scene_array[:, t, z, c, :, :] = scene_array_tzc
+            #         #scene_array[:, t, z, c, :, :] = scene_array_tzc[:, 0, 0]
+            #         scene_array[0, t, z, c, :, :] = scene_array_tzc[0, 0, 0, :, :]
+            #     if scene.posZ == 3:
+            #         # STCZYX
+            #         #scene_array[:, t, c, z, :, :] = scene_array_tzc
+            #         #scene_array[:, t, c, z, :, :] = scene_array_tzc[:, 0, 0]
+            #         scene_array[0, t, c, z, :, :] = scene_array_tzc[0, 0, 0, :, :]
+
+    # in case no T and Z dimension are found
+    if scene.hasT is False and scene.hasZ is False:
+
+        # create an array for the scene
+        # for c in range(czi.dims_shape()[0]['C'][1]):
+        for c in range(scene.sizeC):
+
+            scene_array_c = czi.read_mosaic(region=(scene.xstart,
+                                                    scene.ystart,
+                                                    scene.width,
+                                                    scene.height),
+                                            scale_factor=scalefactor,
+                                            C=c)
+
+            index_list = [0] * (len(scene_array.shape) - 2)
+            index_list[scene.posC] = c
+            scene_array[tuple(index_list)] = scene_array_c[0, :, :]
+
+            # if scene.posC == 1:
+            #     # SCTZYX
+            #     #scene_array[:, c, 0, 0, :, :] = scene_array_c
+            #     scene_array[0, c, 0, 0, :, :] = scene_array_c[0, :, :]
+            # if scene.posC == 2:
+            #     # STCZYX
+            #     #scene_array[:, 0, c, 0, :, :] = scene_array_c
+            #     index_list = [0] * (len(scene_array.shape) - 2)
+            #     index_list[scene.posC] = c
+            #     #slice_object[scene.posZ] = z
+            #     scene_array[tuple(index_list)] = scene_array_c[0, :, :]
+            #     #scene_array[0, 0, c, 0, :, :] = scene_array_c[0, :, :]
+            # if scene.posC == 3:
+            #     # STZCYX
+            #     #scene_array[:, 0, 0, c, :, :] = scene_array_c
+            #     scene_array[0, 0, 0, c, :, :] = scene_array_c[0, :, :]
+
+            # if scene.posC == 1:
+            #    # SCTZYX
+            #    scene_array[:, c, 0:1, 0:1, ...] = scene_array_c
+            # if scene.posC == 2:
+            #    # STCZYX
+            #    scene_array[:, 0:1, c, 0:1, ...] = scene_array_c
+            # if scene.posC == 3:
+            #    # STZCYX
+            #    scene_array[:, 0:1, 0:1, c, ...] = scene_array_c
+
+    if scene.hasT is False and scene.hasZ is True:
+
+        # create an array for the scene
+        for z, c in it.product(range(scene.sizeZ),
+                               range(scene.sizeC)):
+
+            scene_array_zc = czi.read_mosaic(region=(scene.xstart,
+                                                     scene.ystart,
+                                                     scene.width,
+                                                     scene.height),
+                                             scale_factor=scalefactor,
+                                             Z=z,
+                                             C=c)
+
+            index_list = [0] * (len(scene_array.shape) - 2)
+            index_list[scene.posC] = c
+            index_list[scene.posZ] = z
+            scene_array[tuple(index_list)] = scene_array_c[0, 0, :, :]
+
+            # if scene.posC == 1:
+            #     if scene.posZ == 2:
+            #         # SCTZYX
+            #         scene_array[0, c, 0, 0, :, :] = scene_array_zc[0, 0, :, :]
+            #
+            # if scene.posC == 2:
+            #     if scene.posZ == 1:
+            #         # SZCTYX
+            #         scene_array[0, z, c, 0, :, :] = scene_array_zc[0, 0, :, :]
+            #     if scene.posZ == 3:
+            #         # STCZYX
+            #         scene_array[0, 0, c, z, :, :] = scene_array_zc[0, 0, :, :]
+            #
+            # if scene.posC == 3:
+            #     if scene.posZ == 2:
+            #         # STZCYX
+            #         scene_array[0, 0, z, c, :, :] = scene_array_zc[0, 0, :, :]
+
+    return scene_array
+
+
+def get_dtype_fromstring(pixeltype):
+
+    dytpe = None
+
+    if pixeltype == 'gray16' or pixeltype == 'Gray16':
+        dtype = np.dtype(np.int16)
+    if pixeltype == 'gray8' or pixeltype == 'Gray8':
+        dtype = np.dtype(np.int8)
+    if pixeltype == 'bgr48' or pixeltype == 'Bgr48':
+        dtype = np.dtype(np.int16)
+    if pixeltype == 'bgr24' or pixeltype == 'Bgr24':
+        dtype = np.dtype(np.int8)
+
+    return dtype
+
+
+def checkdims_czi(czi, metadata):
+
+    if 'C' in czi.dims:
+        metadata['hasC'] = True
+    else:
+        metadata['hasC'] = False
+
+    if 'T' in czi.dims:
+        metadata['hasT'] = True
+    else:
+        metadata['hasT'] = False
+
+    if 'Z' in czi.dims:
+        metadata['hasZ'] = True
+    else:
+        metadata['hasZ'] = False
+
+    if 'S' in czi.dims:
+        metadata['hasS'] = True
+    else:
+        metadata['hasS'] = False
+
+    if 'M' in czi.dims:
+        metadata['hasM'] = True
+    else:
+        metadata['hasM'] = False
+
+    if 'B' in czi.dims:
+        metadata['hasB'] = True
+    else:
+        metadata['hasB'] = False
+
+    if 'H' in czi.dims:
+        metadata['hasH'] = True
+    else:
+        metadata['hasH'] = False
+
+    return metadata

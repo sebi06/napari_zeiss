@@ -2,9 +2,9 @@
 
 #################################################################
 # File        : napari_tools.py
-# Version     : 0.0.2
+# Version     : 0.0.3
 # Author      : czsrh
-# Date        : 16.05.2021
+# Date        : 09.06.2021
 # Institution : Carl Zeiss Microscopy GmbH
 #
 # Disclaimer: This tool is purely experimental. Feel free to
@@ -44,7 +44,8 @@ from PyQt5.QtCore import pyqtSlot
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtGui import QFont
 
-import tools.imgfile_tools as imf
+import tools.czifile_tools as czt
+#import tools.imgfile_tools as imf
 import zarr
 import dask
 import dask.array as da
@@ -135,10 +136,11 @@ def show_napari(viewer, array, metadata,
     scalefactors = [1.0] * len(array.shape)
 
     # use the dimension string from AICSImageIO 6D
-    dimpos = imf.get_dimpositions(metadata['Axes_aics'])
+    #dimpos = czt.get_dimpositions(metadata['Axes_aics'])
+    dimpos = czt.get_dimpositions(metadata['czi_dims'])
 
     # get the scalefactors from the metadata
-    scalef = imf.get_scalefactor(metadata)
+    scalef = czt.get_scalefactor(metadata)
 
     # modify the tuple for the scales for napari
     scalefactors[dimpos['Z']] = scalef['zx']
@@ -207,7 +209,8 @@ def show_napari(viewer, array, metadata,
         print('Renaming the Sliders based on the Dimension String ....')
 
         # get the label of the sliders (as a tuple) ad rename it
-        viewer.dims.axis_labels = napari_rename_sliders(viewer.dims.axis_labels, metadata['Axes_aics'])
+        #viewer.dims.axis_labels = napari_rename_sliders(viewer.dims.axis_labels, metadata['Axes_aics'])
+        viewer.dims.axis_labels = napari_rename_sliders(viewer.dims.axis_labels, metadata['czi_dims'])
 
     return napari_layers
 
@@ -224,7 +227,7 @@ def napari_rename_sliders(sliders, axes_aics):
     """
 
     # get the positions of dimension entries after removing C dimension
-    dimpos_viewer = imf.get_dimpositions(axes_aics)
+    dimpos_viewer = czt.get_dimpositions(axes_aics)
 
     # update the labels with the correct dimension strings
     slidernames = ['B', 'H', 'V', 'M', 'S', 'T', 'Z']

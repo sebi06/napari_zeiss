@@ -46,8 +46,9 @@ import sys
 import napari
 import numpy as np
 from aicspylibczi import CziFile
-import tools.imgfile_tools as imf
-import tools.fileutils as czt
+import tools.czifile_tools as czt
+#import tools.imgfile_tools as imf
+#import tools.fileutils as czt
 import tools.napari_tools as nap
 from aicsimageio import AICSImage
 import dask
@@ -284,7 +285,7 @@ def open_image_stack(filepath):
         viewer.layers.remove_selected()
 
         # get the metadata
-        metadata, add_metadata = imf.get_metadata(filepath)
+        metadata, add_metadata = czt.get_metadata_czi(filepath)
 
         # add the global metadata and adapt the table display
         mdbrowser.update_metadata(metadata)
@@ -296,12 +297,13 @@ def open_image_stack(filepath):
         # decide which tool to use to read the image
         if metadata['ImageType'] != 'czi':
             use_aicsimageio = True
-        elif metadata['ImageType'] == 'czi' and metadata['czi_isMosaic'] is False:
+        elif metadata['ImageType'] == 'czi' and metadata['isMosaic'] is False:
             use_aicsimageio = True
-        elif metadata['ImageType'] == 'czi' and metadata['czi_isMosaic'] is True:
+        elif metadata['ImageType'] == 'czi' and metadata['isMosaic'] is True:
             use_aicsimageio = False
             use_pylibczi = True
 
+        """
         # check if CZI has T or Z dimension
         hasT = False
         hasZ = False
@@ -310,6 +312,7 @@ def open_image_stack(filepath):
             hasT = True
         if 'Z' in metadata['dims_aicspylibczi']:
             hasZ = True
+        """
 
         if use_aicsimageio:
             # get AICSImageIO object
