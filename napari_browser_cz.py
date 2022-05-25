@@ -2,18 +2,13 @@
 
 #################################################################
 # File        : napari_browser_cz.py
-# Version     : 0.3.0
-# Author      : czsrh
-# Date        : 14.05.2021
-# Institution : Carl Zeiss Microscopy GmbH
+# Author      : sebi06
 #
 # Disclaimer: This tool is purely experimental. Feel free to
 # use it at your own risk. Especially be aware of the fact
 # that automated stage movements might damage hardware if
 # one starts an experiment and the the system is not setup properly.
 # Please check everything in simulation mode first!
-#
-# Copyright (c) 2021 Carl Zeiss AG, Germany. All Rights Reserved.
 #
 #################################################################
 
@@ -45,15 +40,9 @@ from PyQt5.QtGui import QFont
 import sys
 import napari
 import numpy as np
-from aicspylibczi import CziFile
-import tools.czifile_tools as czt
-#import tools.imgfile_tools as imf
-#import tools.fileutils as czt
-import tools.napari_tools as nap
-from aicsimageio import AICSImage
-import dask
-import dask.array as da
-import zarr
+from czimetadata_tools import pylibczirw_metadata as czimd
+from czimetadata_tools import pylibczirw_tools
+from czimetadata_tools import napari_tools
 import os
 from zencontrol import ZenExperiment, ZenDocuments
 from pathlib import Path
@@ -113,7 +102,7 @@ class FileTree(QWidget):
 
         # open the file when clicked
         print('Opening ImageFile : ', filepath)
-        open_image_stack(filepath)
+        open_image_stack(filepath, use_dask=checkboxes.cbox_dask.isChecked())
 
 
 class OptionsWidget(QWidget):
@@ -126,9 +115,9 @@ class OptionsWidget(QWidget):
         self.grid_opt.setSpacing(10)
         self.setLayout(self.grid_opt)
 
-        # add checkbox to use Dask Delayed reader to the grid layout
-        self.cbox_dask = QCheckBox("Use AICSImageIO Dask Reader", self)
-        self.cbox_dask.setChecked(True)
+                # add checkbox to use Dask Delayed reader to the grid layout
+        self.cbox_dask = QCheckBox("Use lazy reading for scenes", self)
+        self.cbox_dask.setChecked(False)
         self.cbox_dask.setStyleSheet("font:bold;"
                                      "font-size: 10px;"
                                      "width :14px;"
@@ -262,20 +251,18 @@ class StartExperiment(QWidget):
         # not nice, but this "redraws" the button
         QtWidgets.QApplication.processEvents()
 
-        # option to use Dask Delayed reader
-        use_dask = checkboxes.cbox_dask.isChecked()
-        print("Use Dask Reader : ", use_dask)
-
         # open the just acquired CZI and show it inside napari viewer
         if self.saved_czifilepath is not None:
-            open_image_stack(self.saved_czifilepath)
+            open_image_stack(self.saved_czifilepath, use_dask=checkboxes.cbox_dask.isChecked())
 
 
-def open_image_stack(filepath):
-    """ Open a file using AICSImageIO and display it using napari
+def open_image_stack(filepath, use_dask=False):
+    """ Open a file using pylibCZIrw and display it inside napari
 
     :param path: filepath of the image
     :type path: str
+    :param use_daks: use lazy reading for scenes
+    :type path: bool
     """
 
     if os.path.isfile(filepath):
@@ -284,140 +271,36 @@ def open_image_stack(filepath):
         viewer.layers.select_all()
         viewer.layers.remove_selected()
 
-        # get the metadata
-        metadata, add_metadata = czt.get_metadata_czi(filepath)
+        # get the complete metadata at once as one big class
+        mdata = czimd.CziMetadata(filepath)
+
+        # create dictionary with some metadata
+        mdict = czimd.create_mdict_red(mdata, sort=True)
 
         # add the global metadata and adapt the table display
-        mdbrowser.update_metadata(metadata)
+        mdbrowser.update_metadata(mdict)
         mdbrowser.update_style()
 
-        use_aicsimageio = True
-        use_pylibczi = False
+        # return a 7d array with dimension order STZCYXA
+        if not use_dask:
+            mdarray, dimstring = pylibczirw_tools.read_mdarray(filepath)
+        if use_dask:
+            print("Lazy reading for CZI scenes will be used.")
+            mdarray, dimstring = pylibczirw_tools.read_mdarray_lazy(filepath)
 
-        # decide which tool to use to read the image
-        if metadata['ImageType'] != 'czi':
-            use_aicsimageio = True
-        elif metadata['ImageType'] == 'czi' and metadata['isMosaic'] is False:
-            use_aicsimageio = True
-        elif metadata['ImageType'] == 'czi' and metadata['isMosaic'] is True:
-            use_aicsimageio = False
-            use_pylibczi = True
-
-        """
-        # check if CZI has T or Z dimension
-        hasT = False
-        hasZ = False
-
-        if 'T' in metadata['dims_aicspylibczi']:
-            hasT = True
-        if 'Z' in metadata['dims_aicspylibczi']:
-            hasZ = True
-        """
-
-        if use_aicsimageio:
-            # get AICSImageIO object
-            img = AICSImage(filepath)
-
-            # check if the Dask Delayed Reader should be used
-            if not checkboxes.cbox_dask.isChecked():
-                print('Using AICSImageIO normal ImageReader.')
-                all_scenes_array = img.get_image_data()
-            if checkboxes.cbox_dask.isChecked():
-                print('Using AICSImageIO Dask Delayed ImageReader')
-                all_scenes_array = img.get_image_dask_data()
-
-        if not use_aicsimageio and use_pylibczi is True:
-
-            # read CZI using aicspylibczi
-            czi = CziFile(filepath)
-
-            # Get the shape of the data
-            print('Dimensions   : ', czi.dims)
-            print('Size         : ', czi.size)
-            print('Shape        : ', czi.dims_shape())
-            print('IsMoasic     : ', czi.is_mosaic())
-            if czi.is_mosaic():
-                print('Mosaic Size  : ', czi.read_mosaic_size())
-
-            # get the required shape for all and single scenes
-            shape_all, shape_single, same_shape = czt.get_shape_allscenes(czi, metadata)
-            print('Required_Array Shape for all scenes: ', shape_all)
-            for sh in shape_single:
-                print('Required Array Shape for single scenes: ', sh)
-
-            if not same_shape:
-                print('No all scenes have the same shape. Exiting ...')
-                sys.exit()
-
-            #array_type = 'dask'
-            array_type = 'zarr'
-            #array_type = 'numpy'
-
-            if array_type == 'zarr':
-
-                # define array to store all channels
-                print('Using aicspylibCZI to read the image (ZARR array).')
-
-                # option 1
-                all_scenes_array = zarr.create(tuple(shape_all),
-                                               dtype=metadata['NumPy.dtype'],
-                                               chunks=True)
-
-                # option 2
-                # all_scenes_array = zarr.open(r'c:\Temp\czi_scene_all.zarr', mode='w',
-                #                            shape=shape_all,
-                #                            chunks=True,
-                #                            dtype=md['NumPy.dtype'])
-
-            if array_type == 'numpy':
-                print('Using aicspylibCZI to read the image (Numpy.Array).')
-                all_scenes_array = np.empty(shape_all, dtype=metadata['NumPy.dtype'])
-
-            if array_type == 'zarr' or array_type == 'numpy':
-
-                # loop over all scenes
-                for s in range(metadata['SizeS']):
-                    # get the CZIscene for the current scene
-                    single_scene = czt.CZIScene(czi, metadata, sceneindex=s)
-                    out = czt.read_czi_scene(czi, single_scene, metadata)
-                    all_scenes_array[s, :, :, :, :, :] = np.squeeze(out, axis=0)
-
-                print(all_scenes_array.shape)
-
-            elif array_type == 'dask':
-
-                def dask_load_sceneimage(czi, s, md):
-
-                    # get the CZIscene for the current scene
-                    single_scene = czt.CZIScene(czi, md, sceneindex=s)
-                    out = czt.read_czi_scene(czi, single_scene, md)
-                    return out
-
-                sp = shape_all[1:]
-
-                # create dask stack of lazy image readers
-                print('Using aicspylibCZI to read the image (Dask.Array) + Delayed Reading.')
-                lazy_process_image = dask.delayed(dask_load_sceneimage)  # lazy reader
-
-                lazy_arrays = [lazy_process_image(czi, s, metadata) for s in range(metadata['SizeS'])]
-
-                dask_arrays = [
-                    da.from_delayed(lazy_array, shape=sp, dtype=metadata['NumPy.dtype'])
-                    for lazy_array in lazy_arrays
-                ]
-                # Stack into one large dask.array
-                all_scenes_array = da.stack(dask_arrays, axis=0)
-                print(all_scenes_array.shape)
+        # remove A dimension do display the array inside Napari
+        dim_order, dim_index, dim_valid = czimd.CziMetadata.get_dimorder(dimstring)
 
         do_scaling = checkboxes.cbox_autoscale.isChecked()
 
         # show the actual image stack
-        nap.show_napari(viewer, all_scenes_array, metadata,
-                        blending='additive',
-                        adjust_contrast=do_scaling,
-                        gamma=0.85,
-                        add_mdtable=False,
-                        rename_sliders=True)
+        layers = napari_tools.show(viewer, mdarray, mdata,
+                                   dim_order=dim_order,
+                                   blending="additive",
+                                   contrast='napari_auto',
+                                   gamma=0.85,
+                                   add_mdtable=False,
+                                   name_sliders=True)
 
 
 def get_zenfolders(zen_subfolder='Experiment Setups'):
@@ -451,10 +334,8 @@ def get_zenfolders(zen_subfolder='Experiment Setups'):
 if __name__ == "__main__":
 
     # make sure this location is correct if you specify this
-    #workdir = r'C:\Users\m1srh\Documents\Zen_Output'
-    #workdir = r'C:\Users\m1srh\OneDrive - Carl Zeiss AG\Testdata_Zeiss'
-    workdir = r'c:\Temp\input'
-    #workdir = r'e:\tuxedo\zen_output'
+    #workdir = r'c:\Temp\input'
+    workdir = r"d:\Testdata_Zeiss\CZI_Testfiles"
 
     if os.path.isdir(workdir):
         print('SaveFolder : ', workdir, 'found.')
@@ -485,7 +366,7 @@ if __name__ == "__main__":
 
     # decide what widget to use - 'tree' or 'dialog'
     # when using the FileTree one cannot navigate to higher levels
-    fileselect = 'dialog'
+    fileselect = 'tree'
 
     # filter for file extensions
     #filter = ['*.czi', '*.ome.tiff', '*ome.tif' '*.tiff' '*.tif']
@@ -519,7 +400,7 @@ if __name__ == "__main__":
         # create the widget elements to be added to the napari viewer
 
         # table for the metadata and for options
-        mdbrowser = nap.TableWidget()
+        mdbrowser = napari_tools.TableWidget()
         checkboxes = OptionsWidget()
 
         # widget to start an experiment in ZEN remotely
